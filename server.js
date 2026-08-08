@@ -21,6 +21,16 @@ const MAX_WINNING_SCORE = 100000;
 const MIN_MAX_ROUNDS = 1;
 const MAX_MAX_ROUNDS = 1000;
 const DISCONNECT_GRACE_MS = Math.max(1000, parseInt(process.env.DISCONNECT_GRACE_MS || '45000', 10));
+const MAX_COMPUTER_PLAYERS = 5;
+const COMPUTER_SKILL_LEVELS = ['random', '1', '2', '3'];
+const DEFAULT_COMPUTER_SKILL = 'random';
+const BOT_MOVE_DELAY_MS = Math.max(0, parseInt(process.env.BOT_MOVE_DELAY_MS || '900', 10));
+// Twenty distinct first names bots are drawn from - pickBotNames() takes a
+// unique subset per table so no two computer players ever share a name.
+const BOT_NAME_POOL = [
+  'Ava', 'Milo', 'Nora', 'Kai', 'Luna', 'Theo', 'Zoe', 'Finn', 'Ivy', 'Owen',
+  'Maya', 'Leo', 'Nina', 'Jasper', 'Ruby', 'Silas', 'Wren', 'Axel', 'Piper', 'Dash'
+];
 const ACCOUNT_FILE_PATH = path.join(__dirname, 'data', 'accounts.json');
 const LOG_FILE_PATH = path.join(__dirname, 'logs', 'server.log');
 const DEFAULT_GAME_TYPE = 'uno';
@@ -211,12 +221,19 @@ function clampInteger(value, min, max, fallback) {
   return Math.min(max, Math.max(min, parsed));
 }
 
+function normalizeComputerSkill(value) {
+  const normalized = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  return COMPUTER_SKILL_LEVELS.indexOf(normalized) !== -1 ? normalized : DEFAULT_COMPUTER_SKILL;
+}
+
 function normalizeMatchSettings(payload) {
   return {
     winningScore: clampInteger(payload && payload.winningScore, MIN_WINNING_SCORE, MAX_WINNING_SCORE, MATCH_POINTS_TO_WIN),
     maxRounds: clampInteger(payload && payload.maxRounds, MIN_MAX_ROUNDS, MAX_MAX_ROUNDS, DEFAULT_MAX_ROUNDS),
     allowDrawTwoStacking: !!(payload && payload.allowDrawTwoStacking),
-    allowWildDrawFourStacking: !!(payload && payload.allowWildDrawFourStacking)
+    allowWildDrawFourStacking: !!(payload && payload.allowWildDrawFourStacking),
+    computerPlayers: clampInteger(payload && payload.computerPlayers, 0, MAX_COMPUTER_PLAYERS, 0),
+    computerSkill: normalizeComputerSkill(payload && payload.computerSkill)
   };
 }
 
@@ -227,7 +244,9 @@ function getMatchSettings(table) {
     winningScore: clampInteger(matchSettings.winningScore, MIN_WINNING_SCORE, MAX_WINNING_SCORE, MATCH_POINTS_TO_WIN),
     maxRounds: clampInteger(matchSettings.maxRounds, MIN_MAX_ROUNDS, MAX_MAX_ROUNDS, DEFAULT_MAX_ROUNDS),
     allowDrawTwoStacking: !!matchSettings.allowDrawTwoStacking,
-    allowWildDrawFourStacking: !!matchSettings.allowWildDrawFourStacking
+    allowWildDrawFourStacking: !!matchSettings.allowWildDrawFourStacking,
+    computerPlayers: clampInteger(matchSettings.computerPlayers, 0, MAX_COMPUTER_PLAYERS, 0),
+    computerSkill: normalizeComputerSkill(matchSettings.computerSkill)
   };
 }
 
@@ -850,6 +869,251 @@ function findAccountByRememberToken(token) {
     return account.rememberTokenHash === tokenHash;
   }) || null;
 }
+function pickBotNames(count, excludeNamesLower) {
+  const available = BOT_NAME_POOL.filter(function (name) {
+    return excludeNamesLower.indexOf(name.toLowerCase()) === -1;
+  });
+  const shuffled = available.slice();
+  shuffle(shuffled);
+
+  const names = [];
+  for (let i = 0; i < count; i++) {
+    names.push(i < shuffled.length ? shuffled[i] : ('Bot' + (i + 1)));
+  }
+  return names;
+}
+
+function resolveBotSkillLevel(computerSkill) {
+  if (computerSkill === 'random') {
+    return 1 + Math.floor(Math.random() * 3);
+  }
+  const parsed = parseInt(computerSkill, 10);
+  return [1, 2, 3].indexOf(parsed) !== -1 ? parsed : 2;
+}
+
+function addComputerPlayersToTable(table, botCount, computerSkill) {
+  if (botCount <= 0) {
+    return [];
+  }
+
+  const existingNamesLower = table.players.map(function (player) {
+    return player.name.toLowerCase();
+  });
+  const botNames = pickBotNames(botCount, existingNamesLower);
+
+  const bots = [];
+  for (let i = 0; i < botCount; i++) {
+    const bot = {
+      id: 'bot_' + crypto.randomBytes(6).toString('hex'),
+      accountId: null,
+      name: botNames[i],
+      hand: [],
+      isBot: true,
+      botSkill: resolveBotSkillLevel(computerSkill)
+    };
+    table.players.push(bot);
+    table.scores[bot.name] = 0;
+    bots.push(bot);
+  }
+
+  return bots;
+}
+
+// --- Computer player (bot) decision logic ---
+// Bots act through the same performDrawCard/performPlayCard/performAcceptStackPenalty/
+// performSubmitGiveCard functions real sockets use (see onConnection), so the rules a
+// bot can and cannot do are identical to a human player - only card/color selection
+// below is bot-specific.
+
+function isBotActionCard(card) {
+  const type = cardType(card);
+  return type === 'Skip' || type === 'Reverse' || type === 'Draw2' || type === 'GivePlusOne';
+}
+
+function pickHighestScoreCard(cards) {
+  return cards.reduce(function (best, candidate) {
+    return cardScore(candidate) > cardScore(best) ? candidate : best;
+  }, cards[0]);
+}
+
+function randomColorChoice() {
+  return COLOR_NAMES[Math.floor(Math.random() * COLOR_NAMES.length)];
+}
+
+function pickBestColorForBot(hand, excludeCard) {
+  const counts = { red: 0, yellow: 0, green: 0, blue: 0 };
+  hand.forEach(function (card) {
+    if (card === excludeCard) {
+      return;
+    }
+    const color = cardColor(card);
+    if (counts[color] !== undefined) {
+      counts[color] += 1;
+    }
+  });
+
+  let bestColor = COLOR_NAMES[0];
+  let bestCount = -1;
+  COLOR_NAMES.forEach(function (color) {
+    if (counts[color] > bestCount) {
+      bestCount = counts[color];
+      bestColor = color;
+    }
+  });
+  return bestColor;
+}
+
+function getLegalBotCards(table, bot) {
+  const stack = table.game.stack;
+  if (stack && stack.active) {
+    return bot.hand.filter(function (card) {
+      return cardType(card) === stack.type;
+    });
+  }
+
+  return bot.hand.filter(function (card) {
+    if (!canPlayCardOnBoard(table, card)) {
+      return false;
+    }
+    if (cardType(card) === 'Draw4') {
+      return isLegalWildDrawFourPlay(table, bot.hand, card);
+    }
+    return true;
+  });
+}
+
+// Skill 1 (easy): random legal card, random wild color.
+// Skill 2 (medium): always sheds its highest point-value legal card.
+// Skill 3 (hard): prefers disruptive action cards over plain numbers, saves
+// Wild/Draw4 for when nothing else is legal, and picks wild colors to match
+// whatever color it is holding the most of.
+function chooseBotPlay(table, bot) {
+  const legalCards = getLegalBotCards(table, bot);
+  if (legalCards.length === 0) {
+    return null;
+  }
+
+  const skill = bot.botSkill || 2;
+  let card;
+
+  if (skill <= 1) {
+    card = legalCards[Math.floor(Math.random() * legalCards.length)];
+  } else if (skill === 2) {
+    card = pickHighestScoreCard(legalCards);
+  } else {
+    const actionCards = legalCards.filter(isBotActionCard);
+    const numberCards = legalCards.filter(function (c) {
+      return cardColor(c) !== 'black' && !isBotActionCard(c);
+    });
+    const draw4Cards = legalCards.filter(function (c) {
+      return cardType(c) === 'Draw4';
+    });
+
+    if (actionCards.length) {
+      card = pickHighestScoreCard(actionCards);
+    } else if (numberCards.length) {
+      card = pickHighestScoreCard(numberCards);
+    } else if (draw4Cards.length) {
+      card = draw4Cards[0];
+    } else {
+      card = legalCards[0];
+    }
+  }
+
+  const isWild = cardColor(card) === 'black';
+  const chosenColor = isWild ? (skill <= 1 ? randomColorChoice() : pickBestColorForBot(bot.hand, card)) : null;
+  return { card: card, chosenColor: chosenColor };
+}
+
+function chooseBotGiveCard(table, bot) {
+  if (!bot.hand.length) {
+    return null;
+  }
+  if ((bot.botSkill || 2) <= 1) {
+    return bot.hand[Math.floor(Math.random() * bot.hand.length)];
+  }
+  return pickHighestScoreCard(bot.hand);
+}
+
+function scheduleBotAction(table, botId) {
+  if (!table || !table.game) {
+    return;
+  }
+  if (table.game.botTimer) {
+    clearTimeout(table.game.botTimer);
+  }
+  table.game.botTimer = setTimeout(function () {
+    table.game.botTimer = null;
+    runBotTurn(table.id, botId);
+  }, BOT_MOVE_DELAY_MS);
+}
+
+// Central hook: called at the end of emitTurnPlayer() (the same signal a human
+// client uses to know it must act) so a bot's move is scheduled exactly when a
+// human would be prompted to draw/play - see also the direct scheduleBotAction()
+// call from performPlayCard()'s Give Plus One branch, which pauses the turn
+// without calling emitTurnPlayer().
+function maybeScheduleBotTurn(table) {
+  if (!table || !table.game || table.status !== 'in_game' || table.game.locked || table.game.pendingGive) {
+    return;
+  }
+
+  const currentPlayer = table.players[table.game.turn];
+  if (currentPlayer && currentPlayer.isBot) {
+    scheduleBotAction(table, currentPlayer.id);
+  }
+}
+
+function runBotTurn(tableId, botId) {
+  const table = tables[tableId];
+  if (!table || table.status !== 'in_game' || !table.game || table.game.locked) {
+    return;
+  }
+
+  const pending = table.game.pendingGive;
+  if (pending) {
+    if (pending.fromPlayerId !== botId) {
+      return;
+    }
+    const bot = table.players[getPlayerIndex(table, botId)];
+    if (!bot || !bot.isBot) {
+      return;
+    }
+    const card = chooseBotGiveCard(table, bot);
+    if (typeof card !== 'number') {
+      return;
+    }
+    performSubmitGiveCard(table, botId, { card: card });
+    return;
+  }
+
+  const currentPlayer = table.players[table.game.turn];
+  if (!currentPlayer || currentPlayer.id !== botId || !currentPlayer.isBot) {
+    return;
+  }
+
+  const stack = table.game.stack;
+  if (stack && stack.active) {
+    const play = chooseBotPlay(table, currentPlayer);
+    if (play) {
+      performPlayCard(table, botId, play);
+    } else {
+      performAcceptStackPenalty(table, botId);
+    }
+    return;
+  }
+
+  if (hasPlayableCard(table, currentPlayer.hand)) {
+    const play = chooseBotPlay(table, currentPlayer);
+    if (play) {
+      performPlayCard(table, botId, play);
+      return;
+    }
+  }
+
+  performDrawCard(table, botId);
+}
+
 function initializeGameState(table) {
   table.game = {
     deck: createDeck(),
@@ -971,9 +1235,14 @@ function beginRound(table, options) {
 }
 
 function startGameForTable(table) {
-  if (table.players.length < MIN_TABLE_PLAYERS) {
+  const settings = getMatchSettings(table);
+  const botSlots = Math.max(0, Math.min(settings.computerPlayers, MAX_TABLE_PLAYERS - table.players.length));
+
+  if (table.players.length + botSlots < MIN_TABLE_PLAYERS) {
     return { success: false, message: 'At least 2 players are required to start a game' };
   }
+
+  addComputerPlayersToTable(table, botSlots, settings.computerSkill);
 
   table.status = 'in_game';
   initializeGameState(table);
@@ -1037,6 +1306,7 @@ function buildTableState(table, socketId) {
         return {
           id: player.id,
           name: player.name,
+          isBot: !!player.isBot,
           cardCount: table.status === 'in_game' ? player.hand.length : 0,
           score: getPlayerScore(table, player.name),
           roundPoints: getRoundPoints(table, player.name)
@@ -1050,6 +1320,17 @@ function buildTableState(table, socketId) {
 function emitTableState(table) {
   table.players.forEach(function (player) {
     io.to(player.id).emit('tableState', buildTableState(table, player.id));
+  });
+}
+
+// Bots have no real socket connection, so io.to(botId) below is always a no-op -
+// this just mirrors socket.to(table.id).emit(...) (broadcast to the table except
+// the actor) for code paths shared between real sockets and performX() bot calls.
+function emitToTableExcept(table, exceptId, event, payload) {
+  table.players.forEach(function (player) {
+    if (player.id !== exceptId) {
+      io.to(player.id).emit(event, payload);
+    }
   });
 }
 
@@ -1106,6 +1387,8 @@ function emitTurnPlayer(table) {
       stackState: buildStackStatePayload(table, player.id)
     });
   });
+
+  maybeScheduleBotTurn(table);
 }
 
 function emitTurnTransition(table, transition) {
@@ -1279,8 +1562,13 @@ function endRound(table, winnerIndex, reason) {
   table.game.startingPlayerIndex = normalizeIndex(table.game.startingPlayerIndex + 1, table.players.length);
   table.game.pendingRoundAcks = {};
   table.players.forEach(function (player) {
-    table.game.pendingRoundAcks[player.id] = true;
+    // Bots have no client to send ackRoundSummary, so they must not gate the
+    // next round - only wait on human players here.
+    if (!player.isBot) {
+      table.game.pendingRoundAcks[player.id] = true;
+    }
   });
+  tryBeginNextRound(table);
 }
 
 function assignNewHostIfNeeded(table) {
@@ -1293,8 +1581,11 @@ function assignNewHostIfNeeded(table) {
   });
 
   if (!hostStillPresent) {
-    table.hostId = table.players[0].id;
-    table.hostName = table.players[0].name;
+    const newHost = table.players.find(function (player) {
+      return !player.isBot;
+    }) || table.players[0];
+    table.hostId = newHost.id;
+    table.hostName = newHost.name;
     io.to(table.id).emit('actionNotice', table.hostName + ' is now table host');
   }
 }
@@ -1358,7 +1649,17 @@ function leaveCurrentTable(socket, reason) {
   socket.leave(table.id);
   socket.tableId = null;
 
-  if (table.players.length === 0) {
+  // A table left with only computer players (every human departed) has no one
+  // left who can ever start a round or leave it, so tear it down rather than
+  // leaving bots running against each other forever.
+  const hasHumanPlayers = table.players.some(function (player) {
+    return !player.isBot;
+  });
+
+  if (table.players.length === 0 || !hasHumanPlayers) {
+    if (table.game && table.game.botTimer) {
+      clearTimeout(table.game.botTimer);
+    }
     if (reason !== 'disconnect') {
       socket.emit('tableState', null);
     }
@@ -1394,6 +1695,416 @@ function validatePlayerReady(socket) {
     return false;
   }
   return true;
+}
+
+// --- Shared gameplay actions ---
+// Each function below holds the full logic for one gameplay action, addressed by
+// actingId (== the acting player's table.players[].id) rather than a live socket.
+// The onConnection() socket.on() handlers are thin wrappers that call these with
+// socket.id; runBotTurn() calls the same functions with a bot's id, so bots are
+// bound by exactly the same rules and validation as a human player. Messages meant
+// for the acting player alone use io.to(actingId).emit(...) - equivalent to
+// socket.emit(...) for a real socket, since every Socket.IO connection auto-joins a
+// room named after its own id, and a harmless no-op when actingId is a bot.
+
+function performDrawCard(table, actingId) {
+  if (!table || table.status !== 'in_game' || !table.game || table.game.locked) {
+    io.to(actingId).emit('drawResult', { success: false, message: 'Unable to draw a card right now' });
+    return;
+  }
+
+  const currentPlayer = table.players[table.game.turn];
+  if (!currentPlayer || currentPlayer.id !== actingId) {
+    io.to(actingId).emit('drawResult', { success: false, message: 'It is not your turn' });
+    return;
+  }
+
+  if (table.game.pendingGive) {
+    io.to(actingId).emit('drawResult', { success: false, message: 'Choose a card to give before doing anything else' });
+    return;
+  }
+
+  if (table.game.hasDrawn) {
+    io.to(actingId).emit('drawResult', { success: false, message: 'You already drew this turn' });
+    return;
+  }
+
+  if (hasPlayableCard(table, currentPlayer.hand)) {
+    io.to(actingId).emit('drawResult', {
+      success: false,
+      message: 'You already have a playable card. Play it instead of drawing.'
+    });
+    return;
+  }
+
+  ensureDeckNotEmpty(table);
+  const card = parseInt(table.game.deck.shift(), 10);
+  currentPlayer.hand.push(card);
+  io.to(currentPlayer.id).emit('haveCard', currentPlayer.hand);
+
+  if (canPlayCardOnBoard(table, card)) {
+    emitToTableExcept(table, actingId, 'playerDrewCard', { playerName: currentPlayer.name });
+    table.game.hasDrawn = true;
+    io.to(actingId).emit('drawResult', {
+      success: true,
+      card: card,
+      message: 'You drew ' + describeCard(card) + '. It is playable. You may play it now.'
+    });
+    emitTableState(table);
+    emitTurnPlayer(table);
+    return;
+  }
+
+  io.to(actingId).emit('drawResult', {
+    success: true,
+    card: card,
+    message: 'You drew ' + describeCard(card) + '. It is not playable. Turn passes.'
+  });
+
+  const nextIndex = getNextPlayerIndex(table, table.game.turn, 1);
+  const nextPlayer = table.players[nextIndex];
+  const transition = {
+    action: 'draw_pass',
+    actorId: currentPlayer.id,
+    actorName: currentPlayer.name,
+    draw: {
+      playerId: currentPlayer.id,
+      playerName: currentPlayer.name,
+      count: 1,
+      cards: [describeCardForAnnouncement(card)]
+    },
+    nextPlayerId: nextPlayer ? nextPlayer.id : null,
+    nextPlayerName: nextPlayer ? nextPlayer.name : ''
+  };
+
+  advanceTurn(table, 1);
+  emitTableState(table);
+  emitTurnTransition(table, transition);
+  emitTurnPlayer(table);
+}
+
+function performAcceptStackPenalty(table, actingId) {
+  if (!table || table.status !== 'in_game' || !table.game || table.game.locked) {
+    io.to(actingId).emit('playResult', { success: false, message: 'Unable to accept the penalty right now' });
+    return;
+  }
+
+  const currentPlayer = table.players[table.game.turn];
+  if (!currentPlayer || currentPlayer.id !== actingId) {
+    io.to(actingId).emit('playResult', { success: false, message: 'It is not your turn' });
+    return;
+  }
+
+  if (!table.game.stack || !table.game.stack.active) {
+    io.to(actingId).emit('playResult', { success: false, message: 'There is no active draw stack' });
+    return;
+  }
+
+  if (table.game.pendingGive) {
+    io.to(actingId).emit('playResult', { success: false, message: 'Choose a card to give before doing anything else' });
+    return;
+  }
+
+  resolveStackPenalty(table);
+}
+
+function performPlayCard(table, actingId, payload) {
+  if (!table || table.status !== 'in_game' || !table.game || table.game.locked) {
+    io.to(actingId).emit('playResult', { success: false, message: 'Unable to play a card right now' });
+    return;
+  }
+
+  const currentPlayerIndex = table.game.turn;
+  const currentPlayer = table.players[currentPlayerIndex];
+  if (!currentPlayer || currentPlayer.id !== actingId) {
+    io.to(actingId).emit('playResult', { success: false, message: 'It is not your turn' });
+    return;
+  }
+
+  if (table.game.pendingGive) {
+    io.to(actingId).emit('playResult', { success: false, message: 'Choose a card to give before doing anything else' });
+    return;
+  }
+
+  const card = payload ? parseInt(payload.card, 10) : NaN;
+  const chosenColor = payload && typeof payload.chosenColor === 'string' ? payload.chosenColor.toLowerCase() : null;
+
+  if (Number.isNaN(card) || currentPlayer.hand.indexOf(card) === -1) {
+    io.to(actingId).emit('playResult', { success: false, message: 'That card is not in your hand' });
+    return;
+  }
+
+  const isWild = cardColor(card) === 'black';
+  if (isWild && ['red', 'yellow', 'green', 'blue'].indexOf(chosenColor) === -1) {
+    io.to(actingId).emit('playResult', { success: false, message: 'Choose a valid color for your Wild card' });
+    return;
+  }
+
+  const type = cardType(card);
+  const drawTwoStackingEnabled = !!table.matchSettings.allowDrawTwoStacking;
+  const drawFourStackingEnabled = !!table.matchSettings.allowWildDrawFourStacking;
+  const activeStack = table.game.stack && table.game.stack.active ? table.game.stack : null;
+  const canContinueStack = !!(activeStack
+    && ((activeStack.type === 'Draw2' && drawTwoStackingEnabled && type === 'Draw2')
+      || (activeStack.type === 'Draw4' && drawFourStackingEnabled && type === 'Draw4')));
+  const stackWillBeActive = !!(activeStack ? canContinueStack : ((type === 'Draw2' && drawTwoStackingEnabled) || (type === 'Draw4' && drawFourStackingEnabled)));
+
+  if (activeStack) {
+    if (!canContinueStack) {
+      io.to(actingId).emit('playResult', {
+        success: false,
+        message: 'You must play a ' + getStackTypeLabel(activeStack.type) + ' or draw the accumulated penalty.'
+      });
+      return;
+    }
+  } else if (!canPlayCardOnBoard(table, card)) {
+    io.to(actingId).emit('playResult', {
+      success: false,
+      message: 'Cannot play ' + describeCard(card) + ' on ' + describeCard(table.game.cardOnBoard, table.game.chosenColor)
+    });
+    return;
+  }
+
+  if (!activeStack && cardType(card) === 'Draw4') {
+    const boardColor = getCurrentBoardColor(table);
+    const hasColorMatch = currentPlayer.hand.some(function (handCard) {
+      return handCard !== card && cardColor(handCard) !== 'black' && cardColor(handCard) === boardColor;
+    });
+
+    if (hasColorMatch) {
+      io.to(actingId).emit('playResult', {
+        success: false,
+        message: 'Wild Draw Four can only be played when you have no card matching the current color'
+      });
+      return;
+    }
+  }
+
+  table.game.cardOnBoard = card;
+  table.game.chosenColor = isWild ? chosenColor : null;
+  table.game.hasDrawn = false;
+
+  const cardPos = currentPlayer.hand.indexOf(card);
+  currentPlayer.hand.splice(cardPos, 1);
+
+  emitDiscardCard(table);
+  io.to(currentPlayer.id).emit('haveCard', currentPlayer.hand);
+
+  const cardDescription = describeCard(card, table.game.chosenColor);
+  const nextIndexAfterPlay = getNextPlayerIndex(table, currentPlayerIndex, 1);
+  const nextPlayerAfterPlay = table.players[nextIndexAfterPlay] || null;
+  const willStartStack = !activeStack && ((type === 'Draw2' && drawTwoStackingEnabled) || (type === 'Draw4' && drawFourStackingEnabled));
+  const willContinueStack = !!activeStack && canContinueStack;
+
+  if (currentPlayer.hand.length === 1) {
+    io.to(table.id).emit('actionNotice', currentPlayer.name + ' says Lumo');
+  }
+
+  if (currentPlayer.hand.length === 0 && !stackWillBeActive) {
+    io.to(actingId).emit('playResult', { success: true, card: card, message: 'You play a ' + cardDescription + '.' });
+    emitToTableExcept(table, actingId, 'cardPlayed', { description: cardDescription });
+    clearActiveStack(table);
+    endRound(table, currentPlayerIndex, 'all_cards_played');
+    return;
+  }
+
+  // A Give Plus One that would leave exactly one card cannot give that last card
+  // away (public/lumo-rules.md), so it plays like a normal card below: no transfer,
+  // turn just advances. With two or more cards left, pause here for the giver to
+  // choose - the turn does not advance until submitGiveCard resolves it.
+  if (type === 'GivePlusOne' && currentPlayer.hand.length >= 2 && nextPlayerAfterPlay) {
+    const giveColor = cardColor(card);
+    table.game.pendingGive = {
+      fromPlayerId: currentPlayer.id,
+      fromPlayerName: currentPlayer.name,
+      toPlayerId: nextPlayerAfterPlay.id,
+      toPlayerName: nextPlayerAfterPlay.name,
+      color: giveColor
+    };
+
+    io.to(actingId).emit('playResult', {
+      success: true,
+      card: card,
+      message: 'You play a ' + giveColor + ' Give Plus One.'
+    });
+    io.to(actingId).emit('giveCardPrompt', { toPlayerName: nextPlayerAfterPlay.name, color: giveColor });
+    emitToTableExcept(table, actingId, 'actionNotice', currentPlayer.name + ' plays a ' + giveColor + ' Give Plus One.');
+    emitTableState(table);
+
+    if (currentPlayer.isBot) {
+      scheduleBotAction(table, currentPlayer.id);
+    }
+    return;
+  }
+
+  let turnSteps = 1;
+  let drawEffect = null;
+  let skippedPlayer = null;
+  let directionLabel = null;
+  let stackMessage = '';
+
+  if (willStartStack || willContinueStack) {
+    if (!activeStack) {
+      activateStack(table, currentPlayer, card, chosenColor);
+    } else {
+      table.game.stack.penalty = (table.game.stack.penalty || 0) + getStackPenaltyAmount(type);
+      table.game.stack.activeColor = type === 'Draw4' ? chosenColor : getCurrentBoardColor(table);
+      table.game.stack.respondingPlayerId = nextPlayerAfterPlay ? nextPlayerAfterPlay.id : null;
+      table.game.stack.respondingPlayerName = nextPlayerAfterPlay ? nextPlayerAfterPlay.name : '';
+    }
+
+    table.game.stack.roundEndPending = !!(table.game.stack && table.game.stack.roundEndPending);
+    turnSteps = 1;
+
+    stackMessage = activeStack
+      ? (currentPlayer.name + ' stacks ' + getStackTypeLabel(type) + '. Draw penalty is now ' + table.game.stack.penalty + '.')
+      : (currentPlayer.name + ' plays ' + getStackTypeLabel(type) + '. Draw penalty is now ' + table.game.stack.penalty + '.');
+
+    if (type === 'Draw4') {
+      stackMessage += ' ' + capitalizeWord(chosenColor) + ' is the active color.';
+    }
+  } else if (type === 'Draw2' || type === 'Draw4') {
+    const drawCount = type === 'Draw2' ? 2 : 4;
+    const targetIndex = nextIndexAfterPlay;
+    const targetPlayer = table.players[targetIndex];
+    drawCardsFromDeck(table, targetIndex, drawCount);
+    const drawnCards = targetPlayer.hand.slice(-drawCount);
+    io.to(targetPlayer.id).emit('haveCard', targetPlayer.hand);
+
+    turnSteps = 2;
+    const cardTypeName = type === 'Draw2' ? 'Draw Two' : 'Wild Draw Four';
+    const drawWord = type === 'Draw2' ? 'two' : 'four';
+    const drawnDescriptions = drawnCards.map(function (drawnCard) {
+      return describeCardForAnnouncement(drawnCard);
+    });
+
+    drawEffect = {
+      playerId: targetPlayer.id,
+      playerName: targetPlayer.name,
+      count: drawCount,
+      cards: drawnDescriptions
+    };
+
+    io.to(actingId).emit('playResult', {
+      success: true,
+      card: card,
+      message: 'You play a ' + cardTypeName + ' and ' + targetPlayer.name + ' draws ' + drawWord + ' cards.'
+    });
+  } else {
+    io.to(actingId).emit('playResult', { success: true, card: card, message: 'You play a ' + cardDescription + '.' });
+
+    if (type === 'Skip') {
+      turnSteps = 2;
+      const skippedIndex = getNextPlayerIndex(table, currentPlayerIndex, 1);
+      skippedPlayer = table.players[skippedIndex] || null;
+    } else if (type === 'Reverse') {
+      table.game.reverse = (table.game.reverse + 1) % 2;
+      directionLabel = getTurnDirectionLabel(table.game.reverse);
+      if (table.players.length === 2) {
+        turnSteps = 2;
+      }
+    }
+  }
+
+  const nextIndex = getNextPlayerIndex(table, currentPlayerIndex, turnSteps);
+  const nextPlayer = table.players[nextIndex];
+  const transition = {
+    action: 'play',
+    actorId: currentPlayer.id,
+    actorName: currentPlayer.name,
+    playedCard: describeCardForAnnouncement(card, table.game.chosenColor),
+    playedType: type,
+    colorChangedTo: isWild ? capitalizeWord(chosenColor) : null,
+    actorHasUno: currentPlayer.hand.length === 1,
+    direction: directionLabel,
+    nextPlayerId: nextPlayer ? nextPlayer.id : null,
+    nextPlayerName: nextPlayer ? nextPlayer.name : ''
+  };
+
+  if (stackMessage) {
+    transition.stackActive = true;
+    transition.stackType = type;
+    transition.stackPenalty = table.game.stack.penalty;
+    transition.stackActiveColor = table.game.stack.activeColor;
+    transition.stackMessage = stackMessage;
+  }
+
+  if (drawEffect) {
+    transition.draw = drawEffect;
+  }
+  if (skippedPlayer) {
+    transition.skippedPlayerId = skippedPlayer.id;
+    transition.skippedPlayerName = skippedPlayer.name;
+  }
+
+  advanceTurn(table, turnSteps);
+  emitTableState(table);
+  emitTurnTransition(table, transition);
+  emitTurnPlayer(table);
+}
+
+function performSubmitGiveCard(table, actingId, payload) {
+  if (!table || table.status !== 'in_game' || !table.game || !table.game.pendingGive) {
+    io.to(actingId).emit('playResult', { success: false, message: 'There is no pending card to give right now' });
+    return;
+  }
+
+  const pending = table.game.pendingGive;
+  if (pending.fromPlayerId !== actingId) {
+    io.to(actingId).emit('playResult', { success: false, message: 'It is not your turn to choose a card to give' });
+    return;
+  }
+
+  const giver = table.players[getPlayerIndex(table, pending.fromPlayerId)];
+  const receiver = table.players[getPlayerIndex(table, pending.toPlayerId)];
+  if (!giver || !receiver) {
+    table.game.pendingGive = null;
+    io.to(actingId).emit('playResult', { success: false, message: 'Unable to complete the card transfer' });
+    return;
+  }
+
+  const card = payload ? parseInt(payload.card, 10) : NaN;
+  const cardPos = giver.hand.indexOf(card);
+
+  // The card just played is already on the discard pile and out of the giver's
+  // hand, so this membership check alone keeps it from being given away too.
+  if (Number.isNaN(card) || cardPos === -1) {
+    io.to(actingId).emit('playResult', { success: false, message: 'Choose a card from your hand to give' });
+    return;
+  }
+
+  giver.hand.splice(cardPos, 1);
+  receiver.hand.push(card);
+  table.game.pendingGive = null;
+
+  io.to(giver.id).emit('haveCard', giver.hand);
+  io.to(receiver.id).emit('haveCard', receiver.hand);
+
+  const cardDescription = describeCardForAnnouncement(card);
+  advanceTurn(table, 1);
+  emitTableState(table);
+
+  table.players.forEach(function (player) {
+    let message;
+    if (player.id === giver.id) {
+      message = 'You pass ' + cardDescription + '. It is ' + receiver.name + "'s turn.";
+    } else if (player.id === receiver.id) {
+      message = giver.name + ' passes ' + cardDescription + ' to you. It is your turn.';
+    } else {
+      message = giver.name + ' passes ' + cardDescription + ' to ' + receiver.name + ". It is " + receiver.name + "'s turn.";
+    }
+
+    io.to(player.id).emit('turnTransition', {
+      action: 'give_resolve',
+      actorId: giver.id,
+      actorName: giver.name,
+      nextPlayerId: receiver.id,
+      nextPlayerName: receiver.name,
+      message: message
+    });
+  });
+
+  emitTurnPlayer(table);
 }
 
 function onConnection(socket) {
@@ -1906,403 +2617,19 @@ function onConnection(socket) {
   });
 
   socket.on('drawCard', function () {
-    const table = findTableBySocket(socket);
-    if (!table || table.status !== 'in_game' || !table.game || table.game.locked) {
-      socket.emit('drawResult', { success: false, message: 'Unable to draw a card right now' });
-      return;
-    }
-
-    const currentPlayer = table.players[table.game.turn];
-    if (!currentPlayer || currentPlayer.id !== socket.id) {
-      socket.emit('drawResult', { success: false, message: 'It is not your turn' });
-      return;
-    }
-
-    if (table.game.pendingGive) {
-      socket.emit('drawResult', { success: false, message: 'Choose a card to give before doing anything else' });
-      return;
-    }
-
-    if (table.game.hasDrawn) {
-      socket.emit('drawResult', { success: false, message: 'You already drew this turn' });
-      return;
-    }
-
-    if (hasPlayableCard(table, currentPlayer.hand)) {
-      socket.emit('drawResult', {
-        success: false,
-        message: 'You already have a playable card. Play it instead of drawing.'
-      });
-      return;
-    }
-
-    ensureDeckNotEmpty(table);
-    const card = parseInt(table.game.deck.shift(), 10);
-    currentPlayer.hand.push(card);
-    io.to(currentPlayer.id).emit('haveCard', currentPlayer.hand);
-
-    if (canPlayCardOnBoard(table, card)) {
-      socket.to(table.id).emit('playerDrewCard', { playerName: currentPlayer.name });
-      table.game.hasDrawn = true;
-      socket.emit('drawResult', {
-        success: true,
-        card: card,
-        message: 'You drew ' + describeCard(card) + '. It is playable. You may play it now.'
-      });
-      emitTableState(table);
-      emitTurnPlayer(table);
-      return;
-    }
-
-    socket.emit('drawResult', {
-      success: true,
-      card: card,
-      message: 'You drew ' + describeCard(card) + '. It is not playable. Turn passes.'
-    });
-
-    const nextIndex = getNextPlayerIndex(table, table.game.turn, 1);
-    const nextPlayer = table.players[nextIndex];
-    const transition = {
-      action: 'draw_pass',
-      actorId: currentPlayer.id,
-      actorName: currentPlayer.name,
-      draw: {
-        playerId: currentPlayer.id,
-        playerName: currentPlayer.name,
-        count: 1,
-        cards: [describeCardForAnnouncement(card)]
-      },
-      nextPlayerId: nextPlayer ? nextPlayer.id : null,
-      nextPlayerName: nextPlayer ? nextPlayer.name : ''
-    };
-
-    advanceTurn(table, 1);
-    emitTableState(table);
-    emitTurnTransition(table, transition);
-    emitTurnPlayer(table);
+    performDrawCard(findTableBySocket(socket), socket.id);
   });
 
   socket.on('acceptStackPenalty', function () {
-    const table = findTableBySocket(socket);
-    if (!table || table.status !== 'in_game' || !table.game || table.game.locked) {
-      socket.emit('playResult', { success: false, message: 'Unable to accept the penalty right now' });
-      return;
-    }
-
-    const currentPlayer = table.players[table.game.turn];
-    if (!currentPlayer || currentPlayer.id !== socket.id) {
-      socket.emit('playResult', { success: false, message: 'It is not your turn' });
-      return;
-    }
-
-    if (!table.game.stack || !table.game.stack.active) {
-      socket.emit('playResult', { success: false, message: 'There is no active draw stack' });
-      return;
-    }
-
-    if (table.game.pendingGive) {
-      socket.emit('playResult', { success: false, message: 'Choose a card to give before doing anything else' });
-      return;
-    }
-
-    resolveStackPenalty(table);
+    performAcceptStackPenalty(findTableBySocket(socket), socket.id);
   });
 
   socket.on('playCard', function (payload) {
-    const table = findTableBySocket(socket);
-    if (!table || table.status !== 'in_game' || !table.game || table.game.locked) {
-      socket.emit('playResult', { success: false, message: 'Unable to play a card right now' });
-      return;
-    }
-
-    const currentPlayerIndex = table.game.turn;
-    const currentPlayer = table.players[currentPlayerIndex];
-    if (!currentPlayer || currentPlayer.id !== socket.id) {
-      socket.emit('playResult', { success: false, message: 'It is not your turn' });
-      return;
-    }
-
-    if (table.game.pendingGive) {
-      socket.emit('playResult', { success: false, message: 'Choose a card to give before doing anything else' });
-      return;
-    }
-
-    const card = payload ? parseInt(payload.card, 10) : NaN;
-    const chosenColor = payload && typeof payload.chosenColor === 'string' ? payload.chosenColor.toLowerCase() : null;
-
-    if (Number.isNaN(card) || currentPlayer.hand.indexOf(card) === -1) {
-      socket.emit('playResult', { success: false, message: 'That card is not in your hand' });
-      return;
-    }
-
-    const isWild = cardColor(card) === 'black';
-    if (isWild && ['red', 'yellow', 'green', 'blue'].indexOf(chosenColor) === -1) {
-      socket.emit('playResult', { success: false, message: 'Choose a valid color for your Wild card' });
-      return;
-    }
-
-    const type = cardType(card);
-    const drawTwoStackingEnabled = !!table.matchSettings.allowDrawTwoStacking;
-    const drawFourStackingEnabled = !!table.matchSettings.allowWildDrawFourStacking;
-    const activeStack = table.game.stack && table.game.stack.active ? table.game.stack : null;
-    const canContinueStack = !!(activeStack
-      && ((activeStack.type === 'Draw2' && drawTwoStackingEnabled && type === 'Draw2')
-        || (activeStack.type === 'Draw4' && drawFourStackingEnabled && type === 'Draw4')));
-    const stackWillBeActive = !!(activeStack ? canContinueStack : ((type === 'Draw2' && drawTwoStackingEnabled) || (type === 'Draw4' && drawFourStackingEnabled)));
-
-    if (activeStack) {
-      if (!canContinueStack) {
-        socket.emit('playResult', {
-          success: false,
-          message: 'You must play a ' + getStackTypeLabel(activeStack.type) + ' or draw the accumulated penalty.'
-        });
-        return;
-      }
-    } else if (!canPlayCardOnBoard(table, card)) {
-      socket.emit('playResult', {
-        success: false,
-        message: 'Cannot play ' + describeCard(card) + ' on ' + describeCard(table.game.cardOnBoard, table.game.chosenColor)
-      });
-      return;
-    }
-
-    if (!activeStack && cardType(card) === 'Draw4') {
-      const boardColor = getCurrentBoardColor(table);
-      const hasColorMatch = currentPlayer.hand.some(function (handCard) {
-        return handCard !== card && cardColor(handCard) !== 'black' && cardColor(handCard) === boardColor;
-      });
-
-      if (hasColorMatch) {
-        socket.emit('playResult', {
-          success: false,
-          message: 'Wild Draw Four can only be played when you have no card matching the current color'
-        });
-        return;
-      }
-    }
-
-    table.game.cardOnBoard = card;
-    table.game.chosenColor = isWild ? chosenColor : null;
-    table.game.hasDrawn = false;
-
-    const cardPos = currentPlayer.hand.indexOf(card);
-    currentPlayer.hand.splice(cardPos, 1);
-
-    emitDiscardCard(table);
-    io.to(currentPlayer.id).emit('haveCard', currentPlayer.hand);
-
-    const cardDescription = describeCard(card, table.game.chosenColor);
-    const nextIndexAfterPlay = getNextPlayerIndex(table, currentPlayerIndex, 1);
-    const nextPlayerAfterPlay = table.players[nextIndexAfterPlay] || null;
-    const willStartStack = !activeStack && ((type === 'Draw2' && drawTwoStackingEnabled) || (type === 'Draw4' && drawFourStackingEnabled));
-    const willContinueStack = !!activeStack && canContinueStack;
-
-    if (currentPlayer.hand.length === 1) {
-      io.to(table.id).emit('actionNotice', currentPlayer.name + ' says Lumo');
-    }
-
-    if (currentPlayer.hand.length === 0 && !stackWillBeActive) {
-      socket.emit('playResult', { success: true, card: card, message: 'You play a ' + cardDescription + '.' });
-      socket.to(table.id).emit('cardPlayed', { description: cardDescription });
-      clearActiveStack(table);
-      endRound(table, currentPlayerIndex, 'all_cards_played');
-      return;
-    }
-
-    // A Give Plus One that would leave exactly one card cannot give that last card
-    // away (public/lumo-rules.md), so it plays like a normal card below: no transfer,
-    // turn just advances. With two or more cards left, pause here for the giver to
-    // choose - the turn does not advance until submitGiveCard resolves it.
-    if (type === 'GivePlusOne' && currentPlayer.hand.length >= 2 && nextPlayerAfterPlay) {
-      const giveColor = cardColor(card);
-      table.game.pendingGive = {
-        fromPlayerId: currentPlayer.id,
-        fromPlayerName: currentPlayer.name,
-        toPlayerId: nextPlayerAfterPlay.id,
-        toPlayerName: nextPlayerAfterPlay.name,
-        color: giveColor
-      };
-
-      socket.emit('playResult', {
-        success: true,
-        card: card,
-        message: 'You play a ' + giveColor + ' Give Plus One.'
-      });
-      socket.emit('giveCardPrompt', { toPlayerName: nextPlayerAfterPlay.name, color: giveColor });
-      socket.to(table.id).emit('actionNotice', currentPlayer.name + ' plays a ' + giveColor + ' Give Plus One.');
-      emitTableState(table);
-      return;
-    }
-
-    let turnSteps = 1;
-    let drawEffect = null;
-    let skippedPlayer = null;
-    let directionLabel = null;
-    let stackMessage = '';
-
-    if (willStartStack || willContinueStack) {
-      if (!activeStack) {
-        activateStack(table, currentPlayer, card, chosenColor);
-      } else {
-        table.game.stack.penalty = (table.game.stack.penalty || 0) + getStackPenaltyAmount(type);
-        table.game.stack.activeColor = type === 'Draw4' ? chosenColor : getCurrentBoardColor(table);
-        table.game.stack.respondingPlayerId = nextPlayerAfterPlay ? nextPlayerAfterPlay.id : null;
-        table.game.stack.respondingPlayerName = nextPlayerAfterPlay ? nextPlayerAfterPlay.name : '';
-      }
-
-      table.game.stack.roundEndPending = !!(table.game.stack && table.game.stack.roundEndPending);
-      turnSteps = 1;
-
-      stackMessage = activeStack
-        ? (currentPlayer.name + ' stacks ' + getStackTypeLabel(type) + '. Draw penalty is now ' + table.game.stack.penalty + '.')
-        : (currentPlayer.name + ' plays ' + getStackTypeLabel(type) + '. Draw penalty is now ' + table.game.stack.penalty + '.');
-
-      if (type === 'Draw4') {
-        stackMessage += ' ' + capitalizeWord(chosenColor) + ' is the active color.';
-      }
-    } else if (type === 'Draw2' || type === 'Draw4') {
-      const drawCount = type === 'Draw2' ? 2 : 4;
-      const targetIndex = nextIndexAfterPlay;
-      const targetPlayer = table.players[targetIndex];
-      drawCardsFromDeck(table, targetIndex, drawCount);
-      const drawnCards = targetPlayer.hand.slice(-drawCount);
-      io.to(targetPlayer.id).emit('haveCard', targetPlayer.hand);
-
-      turnSteps = 2;
-      const cardTypeName = type === 'Draw2' ? 'Draw Two' : 'Wild Draw Four';
-      const drawWord = type === 'Draw2' ? 'two' : 'four';
-      const drawnDescriptions = drawnCards.map(function (drawnCard) {
-        return describeCardForAnnouncement(drawnCard);
-      });
-
-      drawEffect = {
-        playerId: targetPlayer.id,
-        playerName: targetPlayer.name,
-        count: drawCount,
-        cards: drawnDescriptions
-      };
-
-      socket.emit('playResult', {
-        success: true,
-        card: card,
-        message: 'You play a ' + cardTypeName + ' and ' + targetPlayer.name + ' draws ' + drawWord + ' cards.'
-      });
-    } else {
-      socket.emit('playResult', { success: true, card: card, message: 'You play a ' + cardDescription + '.' });
-
-      if (type === 'Skip') {
-        turnSteps = 2;
-        const skippedIndex = getNextPlayerIndex(table, currentPlayerIndex, 1);
-        skippedPlayer = table.players[skippedIndex] || null;
-      } else if (type === 'Reverse') {
-        table.game.reverse = (table.game.reverse + 1) % 2;
-        directionLabel = getTurnDirectionLabel(table.game.reverse);
-        if (table.players.length === 2) {
-          turnSteps = 2;
-        }
-      }
-    }
-
-    const nextIndex = getNextPlayerIndex(table, currentPlayerIndex, turnSteps);
-    const nextPlayer = table.players[nextIndex];
-    const transition = {
-      action: 'play',
-      actorId: currentPlayer.id,
-      actorName: currentPlayer.name,
-      playedCard: describeCardForAnnouncement(card, table.game.chosenColor),
-      playedType: type,
-      colorChangedTo: isWild ? capitalizeWord(chosenColor) : null,
-      actorHasUno: currentPlayer.hand.length === 1,
-      direction: directionLabel,
-      nextPlayerId: nextPlayer ? nextPlayer.id : null,
-      nextPlayerName: nextPlayer ? nextPlayer.name : ''
-    };
-
-    if (stackMessage) {
-      transition.stackActive = true;
-      transition.stackType = type;
-      transition.stackPenalty = table.game.stack.penalty;
-      transition.stackActiveColor = table.game.stack.activeColor;
-      transition.stackMessage = stackMessage;
-    }
-
-    if (drawEffect) {
-      transition.draw = drawEffect;
-    }
-    if (skippedPlayer) {
-      transition.skippedPlayerId = skippedPlayer.id;
-      transition.skippedPlayerName = skippedPlayer.name;
-    }
-
-    advanceTurn(table, turnSteps);
-    emitTableState(table);
-    emitTurnTransition(table, transition);
-    emitTurnPlayer(table);
+    performPlayCard(findTableBySocket(socket), socket.id, payload);
   });
 
   socket.on('submitGiveCard', function (payload) {
-    const table = findTableBySocket(socket);
-    if (!table || table.status !== 'in_game' || !table.game || !table.game.pendingGive) {
-      socket.emit('playResult', { success: false, message: 'There is no pending card to give right now' });
-      return;
-    }
-
-    const pending = table.game.pendingGive;
-    if (pending.fromPlayerId !== socket.id) {
-      socket.emit('playResult', { success: false, message: 'It is not your turn to choose a card to give' });
-      return;
-    }
-
-    const giver = table.players[getPlayerIndex(table, pending.fromPlayerId)];
-    const receiver = table.players[getPlayerIndex(table, pending.toPlayerId)];
-    if (!giver || !receiver) {
-      table.game.pendingGive = null;
-      socket.emit('playResult', { success: false, message: 'Unable to complete the card transfer' });
-      return;
-    }
-
-    const card = payload ? parseInt(payload.card, 10) : NaN;
-    const cardPos = giver.hand.indexOf(card);
-
-    // The card just played is already on the discard pile and out of the giver's
-    // hand, so this membership check alone keeps it from being given away too.
-    if (Number.isNaN(card) || cardPos === -1) {
-      socket.emit('playResult', { success: false, message: 'Choose a card from your hand to give' });
-      return;
-    }
-
-    giver.hand.splice(cardPos, 1);
-    receiver.hand.push(card);
-    table.game.pendingGive = null;
-
-    io.to(giver.id).emit('haveCard', giver.hand);
-    io.to(receiver.id).emit('haveCard', receiver.hand);
-
-    const cardDescription = describeCardForAnnouncement(card);
-    advanceTurn(table, 1);
-    emitTableState(table);
-
-    table.players.forEach(function (player) {
-      let message;
-      if (player.id === giver.id) {
-        message = 'You pass ' + cardDescription + '. It is ' + receiver.name + "'s turn.";
-      } else if (player.id === receiver.id) {
-        message = giver.name + ' passes ' + cardDescription + ' to you. It is your turn.';
-      } else {
-        message = giver.name + ' passes ' + cardDescription + ' to ' + receiver.name + ". It is " + receiver.name + "'s turn.";
-      }
-
-      io.to(player.id).emit('turnTransition', {
-        action: 'give_resolve',
-        actorId: giver.id,
-        actorName: giver.name,
-        nextPlayerId: receiver.id,
-        nextPlayerName: receiver.name,
-        message: message
-      });
-    });
-
-    emitTurnPlayer(table);
+    performSubmitGiveCard(findTableBySocket(socket), socket.id, payload);
   });
 
   socket.on('disconnecting', function () {

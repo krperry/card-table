@@ -198,6 +198,8 @@ const el = {
   newTableMaxRounds: document.getElementById('new-table-max-rounds'),
   allowDrawTwoStacking: document.getElementById('allow-draw-two-stacking'),
   allowWildDrawFourStacking: document.getElementById('allow-wild-draw-four-stacking'),
+  newTableComputerPlayers: document.getElementById('new-table-computer-players'),
+  newTableComputerSkill: document.getElementById('new-table-computer-skill'),
   stackControls: document.getElementById('stack-controls'),
   stackStatus: document.getElementById('stack-status'),
   acceptStackBtn: document.getElementById('accept-stack-btn'),
@@ -980,6 +982,7 @@ function createTable() {
 
   const winningScore = parseInt(el.newTableWinningScore && el.newTableWinningScore.value, 10);
   const maxRounds = parseInt(el.newTableMaxRounds && el.newTableMaxRounds.value, 10);
+  const computerPlayers = parseInt(el.newTableComputerPlayers && el.newTableComputerPlayers.value, 10);
 
   socket.emit('createTable', {
     name: tableName,
@@ -987,7 +990,9 @@ function createTable() {
     winningScore: Number.isFinite(winningScore) ? winningScore : undefined,
     maxRounds: Number.isFinite(maxRounds) ? maxRounds : undefined,
     allowDrawTwoStacking: !!(el.allowDrawTwoStacking && el.allowDrawTwoStacking.checked),
-    allowWildDrawFourStacking: !!(el.allowWildDrawFourStacking && el.allowWildDrawFourStacking.checked)
+    allowWildDrawFourStacking: !!(el.allowWildDrawFourStacking && el.allowWildDrawFourStacking.checked),
+    computerPlayers: Number.isFinite(computerPlayers) ? computerPlayers : undefined,
+    computerSkill: el.newTableComputerSkill ? el.newTableComputerSkill.value : undefined
   });
 }
 
@@ -1840,7 +1845,9 @@ function render() {
 
       el.tableMatchSettings.textContent = 'Winning score: ' + matchSettings.winningScore + ' | Max rounds: ' + matchSettings.maxRounds + roundText + (stackRules.length ? ' | ' + stackRules.join(', ') : '');
     }
-    el.startGameBtn.disabled = !appState.isHost || appState.currentTable.players.length < 2 || appState.gameStatus === 'in_game';
+    const computerPlayerCount = (appState.currentTable.matchSettings && appState.currentTable.matchSettings.computerPlayers) || 0;
+    const effectivePlayerCount = appState.currentTable.players.length + computerPlayerCount;
+    el.startGameBtn.disabled = !appState.isHost || effectivePlayerCount < 2 || appState.gameStatus === 'in_game';
     setTableStatus(appState.tableStatusMessage, appState.tableStatusTone);
     setPlayDirectionIndicator();
     setRoundResult(appState.roundResultMessage);
