@@ -1,4 +1,9 @@
-const socket = io({ autoConnect: true });
+// Socket.IO's default path ("/socket.io") is absolute, so it breaks when this
+// app is reverse-proxied under a sub-path (e.g. valhalla.com/games/). Derive
+// the Socket.IO path from the current page location so it works whether the
+// app is served from the domain root or from a proxied sub-path.
+const socketIoPath = window.location.pathname.replace(/[^/]*$/, '') + 'socket.io';
+const socket = io({ path: socketIoPath, autoConnect: true });
 
 const canvas = document.getElementById('canvas');
 const ctx = canvas.getContext('2d');
