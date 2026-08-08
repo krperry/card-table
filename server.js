@@ -90,7 +90,7 @@ process.on('unhandledRejection', function (reason) {
   logServerError('unhandledRejection', reason instanceof Error ? reason : new Error(String(reason)));
 });
 
-app.use('/games', express.static(__dirname + '/public'));
+app.use(express.static(__dirname + '/public'));
 io.on('connection', onConnection);
 
 io.engine.on('connection_error', function (error) {
