@@ -78,6 +78,12 @@
           <input id="new-table-name" type="text" maxlength="40" placeholder="Table name">
         </div>
         <div class="row">
+          <label class="inline-label" for="new-table-code">Table code (optional, 4 digits)
+            <input id="new-table-code" type="text" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" placeholder="Leave blank for open table" autocomplete="off">
+          </label>
+        </div>
+        <p id="new-table-code-hint" class="hint">Set a 4-digit code so only players who know it can join. Leave it blank to keep the table open to anyone.</p>
+        <div class="row">
           <label class="inline-label" for="new-table-winning-score">Winning score
             <input id="new-table-winning-score" type="number" min="50" max="100000" step="1" value="500">
           </label>
@@ -134,6 +140,8 @@
         <div class="row">
           <button id="start-game-btn" type="button">Start Game</button>
           <button id="leave-table-btn" type="button">Leave Table</button>
+          <button id="change-code-btn" type="button" class="hidden">Change Table Code</button>
+          <button id="kick-player-btn" type="button" class="hidden">Kick Player</button>
         </div>
 
         <div id="game-panel" class="hidden">
@@ -230,6 +238,32 @@
         <div id="rules-content" class="rules-content" aria-live="polite"></div>
         <div class="row">
           <button id="close-rules-btn" type="button">Close Rules</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="change-code-overlay" class="overlay hidden" role="dialog" aria-modal="true" aria-labelledby="change-code-title" aria-describedby="change-code-description">
+      <div class="overlay-card">
+        <h2 id="change-code-title" tabindex="-1">Change table code</h2>
+        <p id="change-code-description">Enter a new 4-digit code so only players who know it can join from now on. Leave the field blank to make the table open again. This does not affect players who already joined.</p>
+        <label class="inline-label" for="change-code-input">New table code
+          <input id="change-code-input" type="text" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" autocomplete="off">
+        </label>
+        <p id="change-code-status" class="hint" role="status" aria-live="polite"></p>
+        <div class="row">
+          <button id="change-code-confirm-btn" type="button">Confirm</button>
+          <button id="change-code-cancel-btn" type="button">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="kick-player-overlay" class="overlay hidden" role="dialog" aria-modal="true" aria-labelledby="kick-player-title" aria-describedby="kick-player-description">
+      <div class="overlay-card">
+        <h2 id="kick-player-title" tabindex="-1">Remove a player</h2>
+        <p id="kick-player-description">Choose a player to remove from the table. They will be notified and returned to the table list.</p>
+        <ul id="kick-player-list" class="kick-player-list" aria-label="Players you can remove"></ul>
+        <div class="row">
+          <button id="kick-player-cancel-btn" type="button">Cancel</button>
         </div>
       </div>
     </div>

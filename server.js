@@ -237,6 +237,25 @@ function normalizeMatchSettings(payload) {
   };
 }
 
+// Table access codes are always exactly 4 digits, or absent (open table). Returns
+// { valid: false } for anything else so callers can reject the request outright.
+function normalizeTableCode(raw) {
+  if (raw === undefined || raw === null || raw === '') {
+    return { valid: true, code: null };
+  }
+
+  const str = String(raw).trim();
+  if (str === '') {
+    return { valid: true, code: null };
+  }
+
+  if (!/^\d{4}$/.test(str)) {
+    return { valid: false, code: null };
+  }
+
+  return { valid: true, code: str };
+}
+
 function getMatchSettings(table) {
   const matchSettings = table && table.matchSettings ? table.matchSettings : {};
 
@@ -1266,7 +1285,8 @@ function buildLobbySnapshot() {
       gameType: table.gameType,
       gameName: gameDefinition.name,
       playerCount: table.players.length,
-      maxPlayers: MAX_TABLE_PLAYERS
+      maxPlayers: MAX_TABLE_PLAYERS,
+      hasCode: !!table.securityCode
     };
   });
 
@@ -1300,6 +1320,7 @@ function buildTableState(table, socketId) {
       status: table.status,
       roundNumber: table.status === 'in_game' && table.game ? (table.game.roundNumber || 1) : null,
       matchSettings: matchSettings,
+      hasCode: !!table.securityCode,
       stackState: buildStackStatePayload(table, socketId),
       givePendingState: buildGivePendingStatePayload(table, socketId),
       players: table.players.map(function (player) {
@@ -1629,25 +1650,16 @@ function handlePlayerRemovalFromGame(table, removedIndex, playerName) {
   io.to(table.id).emit('actionNotice', playerName + ' left the game');
 }
 
-function leaveCurrentTable(socket, reason) {
-  const table = findTableBySocket(socket);
-  if (!table) {
-    return;
-  }
-
-  const playerIndex = getPlayerIndex(table, socket.id);
-  if (playerIndex < 0) {
-    socket.tableId = null;
-    socket.leave(table.id);
-    return;
-  }
-
+// Removes table.players[playerIndex] and settles everything that follows from a
+// seat going away (returning cards to the deck, adjusting turn order, tearing the
+// table down if no humans remain, or reassigning host/broadcasting state
+// otherwise). Shared by a player leaving of their own accord and a host kicking
+// someone else out - both are just "this seat is gone" from this point on.
+function removePlayerFromTable(table, playerIndex) {
   const playerName = table.players[playerIndex].name;
   handlePlayerRemovalFromGame(table, playerIndex, playerName);
 
   table.players.splice(playerIndex, 1);
-  socket.leave(table.id);
-  socket.tableId = null;
 
   // A table left with only computer players (every human departed) has no one
   // left who can ever start a round or leave it, so tear it down rather than
@@ -1660,12 +1672,9 @@ function leaveCurrentTable(socket, reason) {
     if (table.game && table.game.botTimer) {
       clearTimeout(table.game.botTimer);
     }
-    if (reason !== 'disconnect') {
-      socket.emit('tableState', null);
-    }
     delete tables[table.id];
     emitLobbySnapshotAll();
-    return;
+    return { playerName: playerName, tableDeleted: true };
   }
 
   assignNewHostIfNeeded(table);
@@ -1683,6 +1692,27 @@ function leaveCurrentTable(socket, reason) {
     emitTableState(table);
     emitLobbySnapshotAll();
   }
+
+  return { playerName: playerName, tableDeleted: false };
+}
+
+function leaveCurrentTable(socket, reason) {
+  const table = findTableBySocket(socket);
+  if (!table) {
+    return;
+  }
+
+  const playerIndex = getPlayerIndex(table, socket.id);
+  if (playerIndex < 0) {
+    socket.tableId = null;
+    socket.leave(table.id);
+    return;
+  }
+
+  const tableId = table.id;
+  removePlayerFromTable(table, playerIndex);
+  socket.leave(tableId);
+  socket.tableId = null;
 
   if (reason !== 'disconnect') {
     socket.emit('tableState', null);
@@ -2460,6 +2490,12 @@ function onConnection(socket) {
       return;
     }
 
+    const codeResult = normalizeTableCode(payload && payload.securityCode);
+    if (!codeResult.valid) {
+      socket.emit('serverMessage', { type: 'error', message: 'Table code must be exactly 4 digits' });
+      return;
+    }
+
     const gameDefinition = getGameDefinition(gameType);
     if (!gameDefinition.playable) {
       socket.emit('serverMessage', { type: 'error', message: gameDefinition.name + ' is not available yet' });
@@ -2491,7 +2527,8 @@ function onConnection(socket) {
       game: null,
       scores: {},
       dealerIndex: -1,
-      matchSettings: normalizeMatchSettings(payload)
+      matchSettings: normalizeMatchSettings(payload),
+      securityCode: codeResult.code
     };
 
     table.scores[socket.playerName] = 0;
@@ -2533,6 +2570,14 @@ function onConnection(socket) {
       return;
     }
 
+    if (table.securityCode) {
+      const providedCode = payload && typeof payload.code === 'string' ? payload.code.trim() : '';
+      if (providedCode !== table.securityCode) {
+        socket.emit('serverMessage', { type: 'error', message: 'Incorrect table code' });
+        return;
+      }
+    }
+
     console.log('joinTable request', { socketId: socket.id, playerName: socket.playerName, tableId: tableId });
 
     leaveCurrentTable(socket, 'switch_table');
@@ -2558,6 +2603,86 @@ function onConnection(socket) {
 
     leaveCurrentTable(socket, 'leave_table');
     sendLobbySnapshot(socket);
+  });
+
+  socket.on('changeTableCode', function (payload) {
+    if (!validatePlayerReady(socket)) {
+      return;
+    }
+
+    const table = findTableBySocket(socket);
+    if (!table) {
+      socket.emit('serverMessage', { type: 'error', message: 'Join a table first' });
+      return;
+    }
+
+    if (table.hostId !== socket.id) {
+      socket.emit('serverMessage', { type: 'error', message: 'Only the host can change the table code' });
+      return;
+    }
+
+    const codeResult = normalizeTableCode(payload && payload.code);
+    if (!codeResult.valid) {
+      socket.emit('serverMessage', { type: 'error', message: 'Table code must be exactly 4 digits' });
+      return;
+    }
+
+    // Changing the code only affects who can join from here on - players already
+    // seated stay seated, so there is nothing to broadcast to the table itself.
+    table.securityCode = codeResult.code;
+    emitTableState(table);
+    emitLobbySnapshotAll();
+    socket.emit('serverMessage', { type: 'info', message: codeResult.code ? 'Table code updated' : 'Table code removed - the table is open again' });
+  });
+
+  socket.on('kickPlayer', function (payload) {
+    if (!validatePlayerReady(socket)) {
+      return;
+    }
+
+    const table = findTableBySocket(socket);
+    if (!table) {
+      socket.emit('serverMessage', { type: 'error', message: 'Join a table first' });
+      return;
+    }
+
+    if (table.hostId !== socket.id) {
+      socket.emit('serverMessage', { type: 'error', message: 'Only the host can remove players' });
+      return;
+    }
+
+    const targetId = payload && payload.playerId;
+    if (!targetId || targetId === socket.id) {
+      socket.emit('serverMessage', { type: 'error', message: 'Select another player to remove' });
+      return;
+    }
+
+    const playerIndex = getPlayerIndex(table, targetId);
+    if (playerIndex < 0) {
+      socket.emit('serverMessage', { type: 'error', message: 'Player not found' });
+      return;
+    }
+
+    const removedPlayer = table.players[playerIndex];
+    const tableId = table.id;
+    const targetSocket = removedPlayer.isBot ? null : io.sockets.connected[targetId];
+
+    const result = removePlayerFromTable(table, playerIndex);
+
+    if (targetSocket) {
+      targetSocket.leave(tableId);
+      targetSocket.tableId = null;
+      // Order matters: tableState:null first so the client resets/returns to the
+      // lobby, then 'kicked' so the notice overlay opens on top of that screen
+      // instead of being immediately closed by the tableState:null reset.
+      targetSocket.emit('tableState', null);
+      targetSocket.emit('kicked', { message: 'You have been removed from the table by the host' });
+    }
+
+    if (!result.tableDeleted) {
+      io.to(tableId).emit('actionNotice', result.playerName + ' was removed from the table by the host');
+    }
+    socket.emit('serverMessage', { type: 'info', message: result.playerName + ' has been removed from the table' });
   });
 
   socket.on('startGame', function () {

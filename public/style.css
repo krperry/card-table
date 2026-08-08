@@ -109,6 +109,24 @@ button:disabled {
   outline-offset: -2px;
 }
 
+.kick-player-list {
+  list-style: none;
+  margin: 10px 0;
+  padding: 0;
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.kick-player-list li {
+  margin-bottom: 6px;
+}
+
+.kick-player-list button {
+  width: 100%;
+  text-align: left;
+  padding: 10px 12px;
+}
+
 .player-summary li {
   padding: 7px 10px;
   margin-bottom: 6px;

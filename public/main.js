@@ -120,6 +120,10 @@ const appState = {
   pendingWildColor: 'red',
   rulesOpen: false,
   rulesReturnFocusEl: null,
+  changeCodeOpen: false,
+  changeCodeReturnFocusEl: null,
+  kickOpen: false,
+  kickReturnFocusEl: null,
   pendingRoundDealAnnouncement: false,
   playHistory: [],
   roundResultMessage: '',
@@ -158,6 +162,7 @@ const el = {
   joinTableBtn: document.getElementById('join-table-btn'),
   refreshLobbyBtn: document.getElementById('refresh-lobby-btn'),
   newTableName: document.getElementById('new-table-name'),
+  newTableCode: document.getElementById('new-table-code'),
   createTableBtn: document.getElementById('create-table-btn'),
   tableMeta: document.getElementById('table-meta'),
   tableHost: document.getElementById('table-host'),
@@ -168,6 +173,18 @@ const el = {
   playerSummary: document.getElementById('player-summary'),
   startGameBtn: document.getElementById('start-game-btn'),
   leaveTableBtn: document.getElementById('leave-table-btn'),
+  changeCodeBtn: document.getElementById('change-code-btn'),
+  kickPlayerBtn: document.getElementById('kick-player-btn'),
+  changeCodeOverlay: document.getElementById('change-code-overlay'),
+  changeCodeTitle: document.getElementById('change-code-title'),
+  changeCodeInput: document.getElementById('change-code-input'),
+  changeCodeStatus: document.getElementById('change-code-status'),
+  changeCodeConfirmBtn: document.getElementById('change-code-confirm-btn'),
+  changeCodeCancelBtn: document.getElementById('change-code-cancel-btn'),
+  kickPlayerOverlay: document.getElementById('kick-player-overlay'),
+  kickPlayerTitle: document.getElementById('kick-player-title'),
+  kickPlayerList: document.getElementById('kick-player-list'),
+  kickPlayerCancelBtn: document.getElementById('kick-player-cancel-btn'),
   gamePickerSummary: document.getElementById('game-picker-summary'),
   placeholderTitle: document.getElementById('placeholder-title'),
   placeholderMessage: document.getElementById('placeholder-message'),
@@ -484,6 +501,7 @@ function focusBoardForA11y(options) {
   }
 
   if (appState.helpOpen || appState.announcementOpen || appState.rulesOpen
+    || appState.changeCodeOpen || appState.kickOpen
     || (el.colorPickerOverlay && !el.colorPickerOverlay.classList.contains('hidden'))) {
     return;
   }
@@ -712,6 +730,11 @@ function bindUi() {
   bindPress(el.joinTableBtn, joinSelectedTable);
   bindPress(el.startGameBtn, startGame);
   bindPress(el.leaveTableBtn, leaveTable);
+  bindPress(el.changeCodeBtn, openChangeCodeOverlay);
+  bindPress(el.kickPlayerBtn, openKickPlayerOverlay);
+  bindPress(el.changeCodeConfirmBtn, confirmChangeCode);
+  bindPress(el.changeCodeCancelBtn, closeChangeCodeOverlay);
+  bindPress(el.kickPlayerCancelBtn, closeKickPlayerOverlay);
   bindPress(el.placeholderBackBtn, function () {
     showGamePicker();
   });
@@ -774,6 +797,27 @@ function bindUi() {
   el.helpOverlay.addEventListener('keydown', function (event) {
     if (event.key === 'Escape') {
       closeHelpOverlay();
+      event.preventDefault();
+    }
+  });
+
+  el.changeCodeOverlay.addEventListener('keydown', function (event) {
+    if (event.key === 'Escape') {
+      closeChangeCodeOverlay();
+      event.preventDefault();
+    }
+  });
+
+  el.changeCodeInput.addEventListener('keydown', function (event) {
+    if (event.key === 'Enter') {
+      confirmChangeCode();
+      event.preventDefault();
+    }
+  });
+
+  el.kickPlayerOverlay.addEventListener('keydown', function (event) {
+    if (event.key === 'Escape') {
+      closeKickPlayerOverlay();
       event.preventDefault();
     }
   });
@@ -966,6 +1010,10 @@ function deleteLoggedInAccount() {
   socket.emit('deleteAccount', { password: password });
 }
 
+function isValidFourDigitCode(rawValue) {
+  return /^\d{4}$/.test(rawValue);
+}
+
 function createTable() {
   const tableName = (el.newTableName.value || '').trim();
   if (!tableName) {
@@ -980,6 +1028,12 @@ function createTable() {
     return;
   }
 
+  const rawCode = ((el.newTableCode && el.newTableCode.value) || '').trim();
+  if (rawCode && !isValidFourDigitCode(rawCode)) {
+    srSpeak('Table code must be exactly 4 digits, or left blank for an open table', 'assertive');
+    return;
+  }
+
   const winningScore = parseInt(el.newTableWinningScore && el.newTableWinningScore.value, 10);
   const maxRounds = parseInt(el.newTableMaxRounds && el.newTableMaxRounds.value, 10);
   const computerPlayers = parseInt(el.newTableComputerPlayers && el.newTableComputerPlayers.value, 10);
@@ -987,6 +1041,7 @@ function createTable() {
   socket.emit('createTable', {
     name: tableName,
     gameType: selectedGame.type,
+    securityCode: rawCode || undefined,
     winningScore: Number.isFinite(winningScore) ? winningScore : undefined,
     maxRounds: Number.isFinite(maxRounds) ? maxRounds : undefined,
     allowDrawTwoStacking: !!(el.allowDrawTwoStacking && el.allowDrawTwoStacking.checked),
@@ -994,6 +1049,20 @@ function createTable() {
     computerPlayers: Number.isFinite(computerPlayers) ? computerPlayers : undefined,
     computerSkill: el.newTableComputerSkill ? el.newTableComputerSkill.value : undefined
   });
+}
+
+// Shared by the "Join Selected Table" button and clicking a table in the list -
+// both just need a table id, prompting first for a code if the table requires one.
+function attemptJoinTable(table) {
+  let code;
+  if (table.hasCode) {
+    code = window.prompt('This table requires a 4-digit code to join', '');
+    if (code === null) {
+      return;
+    }
+  }
+
+  socket.emit('joinTable', { tableId: table.id, code: code });
 }
 
 function joinSelectedTable() {
@@ -1006,7 +1075,7 @@ function joinSelectedTable() {
     return;
   }
 
-  socket.emit('joinTable', { tableId: selected.id });
+  attemptJoinTable(selected);
 }
 
 function leaveTable() {
@@ -1058,7 +1127,7 @@ function onMouseClick(event) {
     return;
   }
 
-  if (appState.helpOpen || appState.rulesOpen) {
+  if (appState.helpOpen || appState.rulesOpen || appState.changeCodeOpen || appState.kickOpen) {
     return;
   }
 
@@ -1130,6 +1199,16 @@ function handleGameKeys(event) {
     closeHelpOverlay();
     handled = true;
   } else if (appState.helpOpen) {
+    handled = true;
+  } else if (key === 'escape' && (appState.changeCodeOpen || appState.kickOpen)) {
+    if (appState.changeCodeOpen) {
+      closeChangeCodeOverlay();
+    }
+    if (appState.kickOpen) {
+      closeKickPlayerOverlay();
+    }
+    handled = true;
+  } else if (appState.changeCodeOpen || appState.kickOpen) {
     handled = true;
   } else if (isColorPickerOpen()) {
     handled = handleColorPickerKey(key);
@@ -1714,6 +1793,109 @@ function closeRulesOverlay() {
   }
 }
 
+function openChangeCodeOverlay() {
+  if (!el.changeCodeOverlay || !appState.isHost) {
+    return;
+  }
+
+  appState.changeCodeOpen = true;
+  appState.changeCodeReturnFocusEl = document.activeElement && typeof document.activeElement.focus === 'function'
+    ? document.activeElement
+    : null;
+
+  el.changeCodeStatus.textContent = '';
+  el.changeCodeInput.value = '';
+  el.changeCodeOverlay.classList.remove('hidden');
+  el.changeCodeInput.focus();
+  srSpeak('Change table code dialog opened', 'assertive', { canInterruptLock: true });
+}
+
+function closeChangeCodeOverlay() {
+  if (!el.changeCodeOverlay) {
+    return;
+  }
+
+  appState.changeCodeOpen = false;
+  el.changeCodeOverlay.classList.add('hidden');
+
+  const target = appState.changeCodeReturnFocusEl;
+  appState.changeCodeReturnFocusEl = null;
+
+  if (target && typeof target.focus === 'function' && document.contains(target)) {
+    target.focus();
+  } else if (el.changeCodeBtn) {
+    el.changeCodeBtn.focus();
+  }
+}
+
+function confirmChangeCode() {
+  const rawCode = ((el.changeCodeInput && el.changeCodeInput.value) || '').trim();
+  if (rawCode && !isValidFourDigitCode(rawCode)) {
+    el.changeCodeStatus.textContent = 'Enter exactly 4 digits, or leave blank to remove the code.';
+    srSpeak('Table code must be exactly 4 digits, or left blank to remove it', 'assertive');
+    return;
+  }
+
+  socket.emit('changeTableCode', { code: rawCode || undefined });
+  closeChangeCodeOverlay();
+}
+
+function openKickPlayerOverlay() {
+  if (!el.kickPlayerOverlay || !appState.isHost || !appState.currentTable) {
+    return;
+  }
+
+  const others = appState.currentTable.players.filter(function (player) {
+    return player.id !== socket.id && !player.isBot;
+  });
+
+  if (!others.length) {
+    srSpeak('No other players to remove', 'assertive');
+    return;
+  }
+
+  appState.kickOpen = true;
+  appState.kickReturnFocusEl = document.activeElement && typeof document.activeElement.focus === 'function'
+    ? document.activeElement
+    : null;
+
+  el.kickPlayerList.innerHTML = '';
+  others.forEach(function (player) {
+    const li = document.createElement('li');
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = player.name;
+    bindPress(button, function () {
+      socket.emit('kickPlayer', { playerId: player.id });
+      closeKickPlayerOverlay();
+    });
+    li.appendChild(button);
+    el.kickPlayerList.appendChild(li);
+  });
+
+  el.kickPlayerOverlay.classList.remove('hidden');
+  el.kickPlayerTitle.focus();
+  srSpeak('Remove a player dialog opened', 'assertive', { canInterruptLock: true });
+}
+
+function closeKickPlayerOverlay() {
+  if (!el.kickPlayerOverlay) {
+    return;
+  }
+
+  appState.kickOpen = false;
+  el.kickPlayerOverlay.classList.add('hidden');
+
+  const target = appState.kickReturnFocusEl;
+  appState.kickReturnFocusEl = null;
+
+  if (target && typeof target.focus === 'function' && document.contains(target)) {
+    target.focus();
+  } else if (el.kickPlayerBtn) {
+    el.kickPlayerBtn.focus();
+  }
+}
+
 function openHelpOverlay() {
   appState.helpOpen = true;
   el.helpOverlay.classList.remove('hidden');
@@ -1848,6 +2030,16 @@ function render() {
     const computerPlayerCount = (appState.currentTable.matchSettings && appState.currentTable.matchSettings.computerPlayers) || 0;
     const effectivePlayerCount = appState.currentTable.players.length + computerPlayerCount;
     el.startGameBtn.disabled = !appState.isHost || effectivePlayerCount < 2 || appState.gameStatus === 'in_game';
+    if (el.changeCodeBtn) {
+      el.changeCodeBtn.classList.toggle('hidden', !appState.isHost);
+    }
+    if (el.kickPlayerBtn) {
+      const hasOtherPlayers = appState.currentTable.players.some(function (player) {
+        return player.id !== socket.id && !player.isBot;
+      });
+      el.kickPlayerBtn.classList.toggle('hidden', !appState.isHost);
+      el.kickPlayerBtn.disabled = !hasOtherPlayers;
+    }
     setTableStatus(appState.tableStatusMessage, appState.tableStatusTone);
     setPlayDirectionIndicator();
     setRoundResult(appState.roundResultMessage);
@@ -1886,11 +2078,11 @@ function renderLobbyTables() {
     const li = document.createElement('li');
     li.className = 'table-item' + (index === appState.selectedLobbyIndex ? ' selected' : '');
     li.tabIndex = -1;
-    li.textContent = (table.gameName || 'Lumo') + ' | ' + table.name + ' | ' + table.status + ' | ' + table.playerCount + '/' + table.maxPlayers + ' | Host: ' + table.hostName;
+    li.textContent = (table.gameName || 'Lumo') + ' | ' + table.name + (table.hasCode ? ' | Locked' : '') + ' | ' + table.status + ' | ' + table.playerCount + '/' + table.maxPlayers + ' | Host: ' + table.hostName;
     bindPress(li, function () {
       appState.selectedLobbyIndex = index;
       renderLobbyTables();
-      socket.emit('joinTable', { tableId: table.id });
+      attemptJoinTable(table);
     });
     el.tableList.appendChild(li);
   });
@@ -2695,6 +2887,18 @@ socket.on('tableState', function (payload) {
       });
     });
   }
+});
+
+socket.on('kicked', function (payload) {
+  const message = (payload && payload.message) || 'You have been removed from the table by the host';
+  srSpeak(message, 'assertive', { canInterruptLock: true });
+  showAnnouncementOverlay({
+    title: 'Removed from table',
+    message: message,
+    tone: 'info',
+    sticky: true,
+    kind: 'kicked'
+  });
 });
 
 socket.on('starterDrawSummary', function (payload) {
