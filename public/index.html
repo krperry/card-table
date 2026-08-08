@@ -140,7 +140,6 @@
         <div class="row">
           <button id="start-game-btn" type="button">Start Game</button>
           <button id="leave-table-btn" type="button">Leave Table</button>
-          <button id="change-code-btn" type="button" class="hidden">Change Table Code</button>
           <button id="kick-player-btn" type="button" class="hidden">Kick Player</button>
         </div>
 
@@ -238,21 +237,6 @@
         <div id="rules-content" class="rules-content" aria-live="polite"></div>
         <div class="row">
           <button id="close-rules-btn" type="button">Close Rules</button>
-        </div>
-      </div>
-    </div>
-
-    <div id="change-code-overlay" class="overlay hidden" role="dialog" aria-modal="true" aria-labelledby="change-code-title" aria-describedby="change-code-description">
-      <div class="overlay-card">
-        <h2 id="change-code-title" tabindex="-1">Change table code</h2>
-        <p id="change-code-description">Enter a new 4-digit code so only players who know it can join from now on. Leave the field blank to make the table open again. This does not affect players who already joined.</p>
-        <label class="inline-label" for="change-code-input">New table code
-          <input id="change-code-input" type="text" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" autocomplete="off">
-        </label>
-        <p id="change-code-status" class="hint" role="status" aria-live="polite"></p>
-        <div class="row">
-          <button id="change-code-confirm-btn" type="button">Confirm</button>
-          <button id="change-code-cancel-btn" type="button">Cancel</button>
         </div>
       </div>
     </div>

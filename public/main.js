@@ -120,8 +120,6 @@ const appState = {
   pendingWildColor: 'red',
   rulesOpen: false,
   rulesReturnFocusEl: null,
-  changeCodeOpen: false,
-  changeCodeReturnFocusEl: null,
   kickOpen: false,
   kickReturnFocusEl: null,
   pendingRoundDealAnnouncement: false,
@@ -173,14 +171,7 @@ const el = {
   playerSummary: document.getElementById('player-summary'),
   startGameBtn: document.getElementById('start-game-btn'),
   leaveTableBtn: document.getElementById('leave-table-btn'),
-  changeCodeBtn: document.getElementById('change-code-btn'),
   kickPlayerBtn: document.getElementById('kick-player-btn'),
-  changeCodeOverlay: document.getElementById('change-code-overlay'),
-  changeCodeTitle: document.getElementById('change-code-title'),
-  changeCodeInput: document.getElementById('change-code-input'),
-  changeCodeStatus: document.getElementById('change-code-status'),
-  changeCodeConfirmBtn: document.getElementById('change-code-confirm-btn'),
-  changeCodeCancelBtn: document.getElementById('change-code-cancel-btn'),
   kickPlayerOverlay: document.getElementById('kick-player-overlay'),
   kickPlayerTitle: document.getElementById('kick-player-title'),
   kickPlayerList: document.getElementById('kick-player-list'),
@@ -501,7 +492,7 @@ function focusBoardForA11y(options) {
   }
 
   if (appState.helpOpen || appState.announcementOpen || appState.rulesOpen
-    || appState.changeCodeOpen || appState.kickOpen
+    || appState.kickOpen
     || (el.colorPickerOverlay && !el.colorPickerOverlay.classList.contains('hidden'))) {
     return;
   }
@@ -525,8 +516,15 @@ function getGameDefinition(gameType) {
   return GAME_CATALOG[gameType] || null;
 }
 
+function randomFourDigitCode() {
+  return String(Math.floor(1000 + Math.random() * 9000));
+}
+
 function setScreen(screen) {
   appState.currentScreen = screen;
+  if (screen === 'lobby' && el.newTableCode) {
+    el.newTableCode.value = randomFourDigitCode();
+  }
   render();
 }
 
@@ -730,10 +728,7 @@ function bindUi() {
   bindPress(el.joinTableBtn, joinSelectedTable);
   bindPress(el.startGameBtn, startGame);
   bindPress(el.leaveTableBtn, leaveTable);
-  bindPress(el.changeCodeBtn, openChangeCodeOverlay);
   bindPress(el.kickPlayerBtn, openKickPlayerOverlay);
-  bindPress(el.changeCodeConfirmBtn, confirmChangeCode);
-  bindPress(el.changeCodeCancelBtn, closeChangeCodeOverlay);
   bindPress(el.kickPlayerCancelBtn, closeKickPlayerOverlay);
   bindPress(el.placeholderBackBtn, function () {
     showGamePicker();
@@ -797,20 +792,6 @@ function bindUi() {
   el.helpOverlay.addEventListener('keydown', function (event) {
     if (event.key === 'Escape') {
       closeHelpOverlay();
-      event.preventDefault();
-    }
-  });
-
-  el.changeCodeOverlay.addEventListener('keydown', function (event) {
-    if (event.key === 'Escape') {
-      closeChangeCodeOverlay();
-      event.preventDefault();
-    }
-  });
-
-  el.changeCodeInput.addEventListener('keydown', function (event) {
-    if (event.key === 'Enter') {
-      confirmChangeCode();
       event.preventDefault();
     }
   });
@@ -1127,7 +1108,7 @@ function onMouseClick(event) {
     return;
   }
 
-  if (appState.helpOpen || appState.rulesOpen || appState.changeCodeOpen || appState.kickOpen) {
+  if (appState.helpOpen || appState.rulesOpen || appState.kickOpen) {
     return;
   }
 
@@ -1200,15 +1181,10 @@ function handleGameKeys(event) {
     handled = true;
   } else if (appState.helpOpen) {
     handled = true;
-  } else if (key === 'escape' && (appState.changeCodeOpen || appState.kickOpen)) {
-    if (appState.changeCodeOpen) {
-      closeChangeCodeOverlay();
-    }
-    if (appState.kickOpen) {
-      closeKickPlayerOverlay();
-    }
+  } else if (key === 'escape' && appState.kickOpen) {
+    closeKickPlayerOverlay();
     handled = true;
-  } else if (appState.changeCodeOpen || appState.kickOpen) {
+  } else if (appState.kickOpen) {
     handled = true;
   } else if (isColorPickerOpen()) {
     handled = handleColorPickerKey(key);
@@ -1793,53 +1769,6 @@ function closeRulesOverlay() {
   }
 }
 
-function openChangeCodeOverlay() {
-  if (!el.changeCodeOverlay || !appState.isHost) {
-    return;
-  }
-
-  appState.changeCodeOpen = true;
-  appState.changeCodeReturnFocusEl = document.activeElement && typeof document.activeElement.focus === 'function'
-    ? document.activeElement
-    : null;
-
-  el.changeCodeStatus.textContent = '';
-  el.changeCodeInput.value = '';
-  el.changeCodeOverlay.classList.remove('hidden');
-  el.changeCodeInput.focus();
-  srSpeak('Change table code dialog opened', 'assertive', { canInterruptLock: true });
-}
-
-function closeChangeCodeOverlay() {
-  if (!el.changeCodeOverlay) {
-    return;
-  }
-
-  appState.changeCodeOpen = false;
-  el.changeCodeOverlay.classList.add('hidden');
-
-  const target = appState.changeCodeReturnFocusEl;
-  appState.changeCodeReturnFocusEl = null;
-
-  if (target && typeof target.focus === 'function' && document.contains(target)) {
-    target.focus();
-  } else if (el.changeCodeBtn) {
-    el.changeCodeBtn.focus();
-  }
-}
-
-function confirmChangeCode() {
-  const rawCode = ((el.changeCodeInput && el.changeCodeInput.value) || '').trim();
-  if (rawCode && !isValidFourDigitCode(rawCode)) {
-    el.changeCodeStatus.textContent = 'Enter exactly 4 digits, or leave blank to remove the code.';
-    srSpeak('Table code must be exactly 4 digits, or left blank to remove it', 'assertive');
-    return;
-  }
-
-  socket.emit('changeTableCode', { code: rawCode || undefined });
-  closeChangeCodeOverlay();
-}
-
 function openKickPlayerOverlay() {
   if (!el.kickPlayerOverlay || !appState.isHost || !appState.currentTable) {
     return;
@@ -2030,9 +1959,6 @@ function render() {
     const computerPlayerCount = (appState.currentTable.matchSettings && appState.currentTable.matchSettings.computerPlayers) || 0;
     const effectivePlayerCount = appState.currentTable.players.length + computerPlayerCount;
     el.startGameBtn.disabled = !appState.isHost || effectivePlayerCount < 2 || appState.gameStatus === 'in_game';
-    if (el.changeCodeBtn) {
-      el.changeCodeBtn.classList.toggle('hidden', !appState.isHost);
-    }
     if (el.kickPlayerBtn) {
       const hasOtherPlayers = appState.currentTable.players.some(function (player) {
         return player.id !== socket.id && !player.isBot;

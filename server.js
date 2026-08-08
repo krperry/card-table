@@ -2605,36 +2605,6 @@ function onConnection(socket) {
     sendLobbySnapshot(socket);
   });
 
-  socket.on('changeTableCode', function (payload) {
-    if (!validatePlayerReady(socket)) {
-      return;
-    }
-
-    const table = findTableBySocket(socket);
-    if (!table) {
-      socket.emit('serverMessage', { type: 'error', message: 'Join a table first' });
-      return;
-    }
-
-    if (table.hostId !== socket.id) {
-      socket.emit('serverMessage', { type: 'error', message: 'Only the host can change the table code' });
-      return;
-    }
-
-    const codeResult = normalizeTableCode(payload && payload.code);
-    if (!codeResult.valid) {
-      socket.emit('serverMessage', { type: 'error', message: 'Table code must be exactly 4 digits' });
-      return;
-    }
-
-    // Changing the code only affects who can join from here on - players already
-    // seated stay seated, so there is nothing to broadcast to the table itself.
-    table.securityCode = codeResult.code;
-    emitTableState(table);
-    emitLobbySnapshotAll();
-    socket.emit('serverMessage', { type: 'info', message: codeResult.code ? 'Table code updated' : 'Table code removed - the table is open again' });
-  });
-
   socket.on('kickPlayer', function (payload) {
     if (!validatePlayerReady(socket)) {
       return;
