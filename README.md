@@ -12,20 +12,30 @@ This repository is now a standalone project focused on a shared card-table platf
 
 ## Current Status
 
-- UNO is currently the only fully implemented game.
-- Lobby, table join/start flow, and account login are active and used by the UNO experience.
-- The platform is being expanded so additional card games can be added into the same table system.
+- **Lumo** (UNO-like) and **Hearts** are fully implemented and playable.
+- Lobby, table join/start flow, and account login are shared by every game.
+- Spades and Cribbage are registered as accessible previews; their gameplay isn't implemented yet.
 
 ## Planned Games
 
 The following games are planned for addition:
 
-- Hearts
 - Spades
 - Cribbage
 - More to come
 
-## UNO Feature Highlights
+## Architecture: shared platform + per-game modules
+
+The table/lobby/account/networking/accessibility infrastructure is shared by every game; each game's rules, state, and UI live in their own module under `games/` (server) and `public/games/` (client):
+
+- **Shared** (`server.js`, `public/main.js`): accounts/auth, table create/join/leave/kick, the disconnect-grace reconnect flow, the lobby/table-state broadcast dispatcher, screen navigation, ARIA live-region speech (`srSpeak`), and overlay/keyboard-binding scaffolding.
+- **Lumo** (`games/lumo/`, `public/games/lumo/lumo-client.js`): the UNO-like deck, turn/stacking/Give-Plus-One rules, bot AI, and canvas-based board rendering. See `public/lumo-rules.md` for the house rules.
+- **Hearts** (`games/hearts/`, `public/games/hearts/hearts-client.js`): a pure rules engine (`games/hearts/rules.js`, no networking - unit tested directly in `tests/hearts-rules.test.js`), simple bot heuristics (`games/hearts/bots.js`), and a native-button (not canvas) accessible UI for passing/trick play.
+- **Standard playing-card art**: `public/images/playing-cards/` (52 cards + jokers/backs, `<RANK><SUIT>.svg` naming, e.g. `QS.svg` = Queen of Spades). Used by Hearts today; kept generic so future standard-deck games (Spades, Blackjack, Poker, ...) can reuse it. Lumo's own custom card art lives separately at `public/images/lumo/cards/`.
+- **`games/registry.js`** assembles the game-module registry from factory functions - each game module is `module.exports = function createXGame(deps) { ...; return { type, name, minPlayers, maxPlayers, startGame, buildTableStateExtra, registerSocketHandlers, ... }; }`, where `deps` is a small set of shared primitives (`io`, `tables`, `shuffle`, `emitTableState`, ...) injected once at startup. `server.js`'s generic dispatchers (`buildTableState`, the `startGame` handler, `removePlayerFromTable`, `reclaimSeatAfterReconnect`) call into whichever module matches a table's `gameType`.
+- **Adding a new game**: create `games/<name>/index.js` (factory returning the module interface above) and register it in `games/registry.js`; on the client, add a `public/games/<name>/<name>-client.js` script (loaded after `main.js`, sharing its scope) and a `<div id="<name>-panel">` in `index.html`. Game-specific Socket.IO events should use a `<name>`-prefixed event name (e.g. `heartsPlayCard`) so they can never collide with another game's events, mirroring how Lumo and Hearts already coexist.
+
+## Lumo Feature Highlights
 
 - Host-controlled table start (minimum 2 players)
 - Up to 6 players per table
@@ -33,6 +43,14 @@ The following games are planned for addition:
 - Wild and Wild Draw Four flow with server-side validation
 - Keyboard command support for gameplay actions
 - Live screen-reader announcements for turns and game events
+
+## Hearts Feature Highlights
+
+- Standard four-player Hearts: deal, follow-suit, Hearts-breaking (with the only-Hearts-remaining exception), first-trick restrictions, Queen of Spades, shooting the moon
+- Full passing cycle (left / right / across / hold) with private, accessible card selection
+- Host can start early with fewer than four humans; computer players fill the remaining seats
+- Play continues over multiple hands until a hand pushes a player to the configurable "points to end game" (default 100), then the lowest cumulative score wins
+- Server-authoritative legal-move enforcement with accessible rejection messages (illegal plays never change game state or advance the turn)
 
 ## Accessibility Commitments
 

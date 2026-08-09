@@ -83,45 +83,55 @@
           </label>
         </div>
         <p id="new-table-code-hint" class="hint">Set a 4-digit code so only players who know it can join. Leave it blank to keep the table open to anyone.</p>
-        <div class="row">
-          <label class="inline-label" for="new-table-winning-score">Winning score
-            <input id="new-table-winning-score" type="number" min="50" max="100000" step="1" value="500">
-          </label>
-          <label class="inline-label" for="new-table-max-rounds">Max rounds
-            <input id="new-table-max-rounds" type="number" min="1" max="1000" step="1" value="30">
-          </label>
+        <div id="lumo-table-settings">
+          <div class="row">
+            <label class="inline-label" for="new-table-winning-score">Winning score
+              <input id="new-table-winning-score" type="number" min="50" max="100000" step="1" value="500">
+            </label>
+            <label class="inline-label" for="new-table-max-rounds">Max rounds
+              <input id="new-table-max-rounds" type="number" min="1" max="1000" step="1" value="30">
+            </label>
+          </div>
+            <div class="checkbox-row">
+              <label class="inline-label" for="allow-draw-two-stacking">
+                <input id="allow-draw-two-stacking" type="checkbox">
+                Allow Draw Two Stacking
+              </label>
+            </div>
+            <div class="checkbox-row">
+              <label class="inline-label" for="allow-wild-draw-four-stacking">
+                <input id="allow-wild-draw-four-stacking" type="checkbox">
+                Allow Wild Draw Four Stacking
+              </label>
+            </div>
+          <div class="row">
+            <label class="inline-label" for="new-table-computer-players">Computer players
+              <select id="new-table-computer-players">
+                <option value="0" selected>0</option>
+                <option value="1">1</option>
+                <option value="2">2</option>
+                <option value="3">3</option>
+                <option value="4">4</option>
+                <option value="5">5</option>
+              </select>
+            </label>
+            <label class="inline-label" for="new-table-computer-skill">Computer skill
+              <select id="new-table-computer-skill">
+                <option value="random" selected>Random</option>
+                <option value="1">1 (Easy)</option>
+                <option value="2">2 (Medium)</option>
+                <option value="3">3 (Hard)</option>
+              </select>
+            </label>
+          </div>
         </div>
-          <div class="checkbox-row">
-            <label class="inline-label" for="allow-draw-two-stacking">
-              <input id="allow-draw-two-stacking" type="checkbox">
-              Allow Draw Two Stacking
+        <div id="hearts-table-settings" class="hidden">
+          <div class="row">
+            <label class="inline-label" for="new-table-points-to-end-game">Points to end game
+              <input id="new-table-points-to-end-game" type="number" min="50" max="500" step="1" value="100">
             </label>
           </div>
-          <div class="checkbox-row">
-            <label class="inline-label" for="allow-wild-draw-four-stacking">
-              <input id="allow-wild-draw-four-stacking" type="checkbox">
-              Allow Wild Draw Four Stacking
-            </label>
-          </div>
-        <div class="row">
-          <label class="inline-label" for="new-table-computer-players">Computer players
-            <select id="new-table-computer-players">
-              <option value="0" selected>0</option>
-              <option value="1">1</option>
-              <option value="2">2</option>
-              <option value="3">3</option>
-              <option value="4">4</option>
-              <option value="5">5</option>
-            </select>
-          </label>
-          <label class="inline-label" for="new-table-computer-skill">Computer skill
-            <select id="new-table-computer-skill">
-              <option value="random" selected>Random</option>
-              <option value="1">1 (Easy)</option>
-              <option value="2">2 (Medium)</option>
-              <option value="3">3 (Hard)</option>
-            </select>
-          </label>
+          <p class="hint">Hearts always seats exactly four players. If fewer than four have joined, starting the table fills the rest with computer players.</p>
         </div>
         <div class="row">
           <button id="create-table-btn" type="button">Create Table</button>
@@ -169,6 +179,39 @@
           </p>
           <p class="hint">Mouse, touch, and keyboard are all supported. Press question mark on the board for keyboard commands.</p>
         </div>
+
+        <div id="hearts-panel" class="hidden" tabindex="-1">
+          <div id="hearts-status" class="hearts-status" aria-label="Hearts game status">
+            <p id="hearts-status-hand"></p>
+            <p id="hearts-status-direction"></p>
+            <p id="hearts-status-turn"></p>
+            <p id="hearts-status-hearts-broken"></p>
+            <p id="hearts-status-trick"></p>
+            <p id="hearts-status-score"></p>
+          </div>
+
+          <div id="hearts-passing-area" class="hearts-section hidden" aria-labelledby="hearts-passing-title">
+            <h3 id="hearts-passing-title">Pass three cards</h3>
+            <p id="hearts-passing-instructions" class="hint"></p>
+            <div id="hearts-passing-hand" class="hearts-hand" role="group" aria-label="Your hand - select three cards to pass"></div>
+            <button id="hearts-pass-btn" type="button" disabled>Pass Cards</button>
+          </div>
+
+          <div id="hearts-trick-area" class="hearts-section hidden" aria-labelledby="hearts-trick-title">
+            <h3 id="hearts-trick-title">Current Trick</h3>
+            <ul id="hearts-trick-list" class="hearts-trick-list" aria-label="Cards played to the current trick"></ul>
+          </div>
+
+          <div id="hearts-hand-area" class="hearts-section hidden" aria-labelledby="hearts-hand-title">
+            <h3 id="hearts-hand-title">Your Hand</h3>
+            <div id="hearts-hand" class="hearts-hand" role="group" aria-label="Your hand"></div>
+          </div>
+
+          <p id="hearts-help" class="visually-hidden">
+            Use the Tab key or arrow keys to move between cards, then Enter or Space to select or play one. Press question mark to open the keyboard commands dialog.
+          </p>
+          <p class="hint">Mouse, touch, and keyboard are all supported. Press question mark for keyboard commands.</p>
+        </div>
       </section>
     </main>
 
@@ -176,7 +219,7 @@
       <div class="overlay-card">
         <h2 id="help-title">Keyboard Commands</h2>
         <p>Press Escape to close this dialog and return focus to the game board.</p>
-        <ul>
+        <ul id="help-content-lumo">
           <li>Left Arrow: select previous card</li>
           <li>Right Arrow: select next card</li>
           <li>Home: select first card</li>
@@ -197,6 +240,17 @@
           <li>B / Shift+B: select highest / lowest blue card</li>
           <li>G / Shift+G: select highest / lowest green card</li>
           <li>Playing a Give Plus One works like a normal play; your turn continues so you can select any card from your hand and press Enter to pass it to the next player</li>
+          <li>?: open this help</li>
+          <li>Escape: close this help</li>
+        </ul>
+        <ul id="help-content-hearts" class="hidden">
+          <li>Tab / Shift+Tab: move between cards in your hand</li>
+          <li>Enter or Space: select a card for passing, or play the focused card on your turn</li>
+          <li>H: announce your full hand</li>
+          <li>T: announce hand number, direction, current player, and whether Hearts are broken</li>
+          <li>P: announce the cards played so far in the current trick</li>
+          <li>S: announce your score</li>
+          <li>Shift+S: announce every player's score, lowest to highest</li>
           <li>?: open this help</li>
           <li>Escape: close this help</li>
         </ul>
@@ -259,5 +313,11 @@
     <script src="touch-helpers.js"></script>
     <script src="uno-speech.js"></script>
     <script src="main.js"></script>
+    <script src="games/lumo/lumo-client.js"></script>
+    <script src="games/hearts/hearts-client.js"></script>
+    <!-- Game client modules share main.js's scope (see lumo-client.js's header
+         comment); init() is called last, once every game module has finished
+         registering its socket handlers. -->
+    <script>init();</script>
   </body>
 </html>

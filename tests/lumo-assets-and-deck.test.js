@@ -143,10 +143,14 @@ test('the old UNO sprite-sheet artwork is no longer shipped or referenced', asyn
   assert.equal(fs.existsSync(path.join(REPO_ROOT, 'public', 'images', 'uno.svg')), false);
   assert.equal(fs.existsSync(path.join(REPO_ROOT, 'public', 'lumo-cards')), false, 'card artwork should have moved into public/images/lumo/cards');
 
+  // Card artwork path handling lives in the Lumo client module (public/games/lumo/lumo-client.js),
+  // not the shared app shell (public/main.js) - see the games/lumo split.
   const mainJsSource = fs.readFileSync(path.join(REPO_ROOT, 'public', 'main.js'), 'utf8');
-  assert.doesNotMatch(mainJsSource, /images\/deck\.svg/);
-  assert.doesNotMatch(mainJsSource, /images\/uno\.svg/);
-  assert.match(mainJsSource, /images\/lumo\/cards\//);
+  const lumoClientSource = fs.readFileSync(path.join(REPO_ROOT, 'public', 'games', 'lumo', 'lumo-client.js'), 'utf8');
+  const combinedClientSource = mainJsSource + '\n' + lumoClientSource;
+  assert.doesNotMatch(combinedClientSource, /images\/deck\.svg/);
+  assert.doesNotMatch(combinedClientSource, /images\/uno\.svg/);
+  assert.match(combinedClientSource, /images\/lumo\/cards\//);
 
   const indexHtmlSource = fs.readFileSync(path.join(REPO_ROOT, 'public', 'index.html'), 'utf8');
   assert.doesNotMatch(indexHtmlSource, /images\/uno\.svg/);
@@ -180,23 +184,29 @@ test('the Lumo rules page is reachable and the table/lobby view exposes a Read L
 
 test('Q and Shift+Q speech helpers never include the internal card sort/score value', () => {
   const mainJsSource = fs.readFileSync(path.join(REPO_ROOT, 'public', 'main.js'), 'utf8');
+  const lumoClientSource = fs.readFileSync(path.join(REPO_ROOT, 'public', 'games', 'lumo', 'lumo-client.js'), 'utf8');
+  const combinedClientSource = mainJsSource + '\n' + lumoClientSource;
 
   // Regression guard for the old behavior that appended entry.score to the spoken text.
-  assert.doesNotMatch(mainJsSource, /describeCardForSpeech\(entry\.card\)\s*\+\s*['"]\s*['"]\s*\+\s*entry\.score/);
-  assert.match(mainJsSource, /function formatCardTypeForSpeech/);
-  assert.match(mainJsSource, /Give Plus One/);
+  assert.doesNotMatch(combinedClientSource, /describeCardForSpeech\(entry\.card\)\s*\+\s*['"]\s*['"]\s*\+\s*entry\.score/);
+  assert.match(combinedClientSource, /function formatCardTypeForSpeech/);
+  assert.match(combinedClientSource, /Give Plus One/);
 });
 
 test('all user-facing UNO references in the client and server were renamed to Lumo', () => {
   const mainJsSource = fs.readFileSync(path.join(REPO_ROOT, 'public', 'main.js'), 'utf8');
+  const lumoClientSource = fs.readFileSync(path.join(REPO_ROOT, 'public', 'games', 'lumo', 'lumo-client.js'), 'utf8');
+  const combinedClientSource = mainJsSource + '\n' + lumoClientSource;
   const indexHtmlSource = fs.readFileSync(path.join(REPO_ROOT, 'public', 'index.html'), 'utf8');
   const serverSource = fs.readFileSync(path.join(REPO_ROOT, 'server.js'), 'utf8');
+  const lumoServerSource = fs.readFileSync(path.join(REPO_ROOT, 'games', 'lumo', 'index.js'), 'utf8');
+  const combinedServerSource = serverSource + '\n' + lumoServerSource;
 
   assert.doesNotMatch(indexHtmlSource, /<title>Uno<\/title>/i);
   assert.match(indexHtmlSource, /<title>Lumo<\/title>/);
   assert.match(indexHtmlSource, /<h1>Lumo Online<\/h1>/);
-  assert.doesNotMatch(mainJsSource, /says UNO/);
-  assert.match(mainJsSource, /says Lumo/);
-  assert.doesNotMatch(serverSource, /says UNO/);
-  assert.match(serverSource, /name: 'Lumo'/);
+  assert.doesNotMatch(combinedClientSource, /says UNO/);
+  assert.match(combinedClientSource, /says Lumo/);
+  assert.doesNotMatch(combinedServerSource, /says UNO/);
+  assert.match(combinedServerSource, /name: 'Lumo'/);
 });

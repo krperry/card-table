@@ -555,3 +555,117 @@ canvas {
     flex-direction: column;
   }
 }
+
+#hearts-panel {
+  margin-top: 10px;
+  padding: 10px;
+  border-radius: 10px;
+  background: #10ac84;
+}
+
+#hearts-panel:focus {
+  outline: 2px solid #f8fff6;
+  outline-offset: 2px;
+}
+
+.hearts-status {
+  margin: 0 0 12px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: #ecf6f4;
+  border: 1px solid #b7d2cc;
+}
+
+.hearts-status p {
+  margin: 4px 0;
+  color: #1d4342;
+  font-weight: 600;
+}
+
+.hearts-section {
+  margin-bottom: 14px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: #ecf6f4;
+  border: 1px solid #b7d2cc;
+}
+
+.hearts-section h3 {
+  margin: 0 0 8px;
+  color: #123b39;
+}
+
+.hearts-hand {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.hearts-hand button,
+.hearts-trick-list img {
+  background: #fff;
+  border: 2px solid #a7bdb7;
+  border-radius: 8px;
+  padding: 2px;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.hearts-hand button {
+  width: 76px;
+  min-height: 108px;
+}
+
+.hearts-hand button img {
+  width: 100%;
+  height: auto;
+  display: block;
+  pointer-events: none;
+}
+
+.hearts-hand button:focus-visible {
+  outline: 3px solid #0d7c67;
+  outline-offset: 1px;
+}
+
+.hearts-hand button.selected {
+  border-color: #0d7c67;
+  box-shadow: 0 0 0 3px rgba(13, 124, 103, 0.3);
+}
+
+.hearts-hand button[aria-disabled="true"] {
+  opacity: 0.4;
+}
+
+.hearts-trick-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.hearts-trick-list li {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  color: #234544;
+  width: 90px;
+}
+
+.hearts-trick-list img {
+  width: 60px;
+  height: auto;
+}
+
+.hearts-trick-winner {
+  width: auto !important;
+  font-weight: 700;
+}
+
+#hearts-pass-btn {
+  margin-top: 10px;
+}
