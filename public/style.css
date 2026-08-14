@@ -633,6 +633,11 @@ canvas {
   box-shadow: 0 0 0 3px rgba(13, 124, 103, 0.3);
 }
 
+.hearts-hand button.received {
+  border-color: #b8860b;
+  box-shadow: 0 0 0 3px rgba(184, 134, 11, 0.35);
+}
+
 .hearts-hand button[aria-disabled="true"] {
   opacity: 0.4;
 }

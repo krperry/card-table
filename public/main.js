@@ -883,7 +883,6 @@ function closeAnnouncementOverlay(restoreFocus) {
 
   if (wasOpen && kind === 'heartsHandSummary') {
     socket.emit('heartsAckHandSummary');
-    setTableStatus('Waiting for other players to continue...', 'info');
   }
 
   if (restoreFocus === false) {
@@ -1335,7 +1334,16 @@ socket.on('tableState', function (payload) {
     if (!appState.tableStatusMessage || appState.tableStatusTone !== 'success') {
       setTableStatus('Waiting for the host to start the next game.', 'info');
     }
-  } else if (!appState.currentTurnPlayerId) {
+  } else if (!appState.currentTurnPlayerId && !isHeartsTable()) {
+    // currentTurnPlayerId/appState.turn are Lumo-only fields (set from
+    // lumo-client.js) - Hearts tracks turn state separately via
+    // appState.heartsTurnPlayerId and announces it itself (see
+    // heartsTurnState in hearts-client.js), so this branch must not run for
+    // Hearts tables. Without this guard it fired on every single tableState
+    // broadcast during Hearts play (currentTurnPlayerId is always falsy for
+    // Hearts), overwriting the real turn status with a stale "waiting for
+    // the next turn update" message even when it actually was the viewer's
+    // turn, and auto-closing/acking any open hand-summary overlay early.
     appState.playDirection = normalizeDirection(appState.playDirection);
     const isRoundOrMatchDialogOpen = appState.announcementOpen
       && (appState.announcementKind === 'roundSummary' || appState.announcementKind === 'matchSummary');
@@ -1349,11 +1357,21 @@ socket.on('tableState', function (payload) {
 
   if (enteredInGame) {
     clearPlayHistory();
-    window.requestAnimationFrame(function () {
-      focusBoardForA11y({
-        announceOnFocus: true
+    if (isHeartsTable()) {
+      // Hearts manages its own focus once the hand/passing UI actually
+      // renders (see heartsPassPrompt/heartsHand in hearts-client.js) -
+      // focusing el.heartsPanel here as well would race that more specific
+      // focus call (both scheduled via requestAnimationFrame) and could win,
+      // leaving focus stuck on the generic panel instead of the first dealt
+      // card. focusBoardForA11y() below is Lumo-specific (it focuses the
+      // canvas), so this branch intentionally does nothing for Hearts.
+    } else {
+      window.requestAnimationFrame(function () {
+        focusBoardForA11y({
+          announceOnFocus: true
+        });
       });
-    });
+    }
   }
 });
 

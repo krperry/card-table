@@ -192,7 +192,7 @@
 
           <div id="hearts-passing-area" class="hearts-section hidden" aria-labelledby="hearts-passing-title">
             <h3 id="hearts-passing-title">Pass three cards</h3>
-            <p id="hearts-passing-instructions" class="hint"></p>
+            <p id="hearts-passing-instructions" class="hint">Select three cards, then press Enter while a card is focused (or use the Pass Cards button) to pass them.</p>
             <div id="hearts-passing-hand" class="hearts-hand" role="group" aria-label="Your hand - select three cards to pass"></div>
             <button id="hearts-pass-btn" type="button" disabled>Pass Cards</button>
           </div>
@@ -208,7 +208,7 @@
           </div>
 
           <p id="hearts-help" class="visually-hidden">
-            Use the Tab key or arrow keys to move between cards, then Enter or Space to select or play one. Press question mark to open the keyboard commands dialog.
+            Use the arrow keys to move between cards. Press Space to select or unselect a card for passing, then Enter to pass your three selected cards. During play, press Enter or Space to play the focused card. Press question mark to open the keyboard commands dialog.
           </p>
           <p class="hint">Mouse, touch, and keyboard are all supported. Press question mark for keyboard commands.</p>
         </div>
@@ -244,8 +244,10 @@
           <li>Escape: close this help</li>
         </ul>
         <ul id="help-content-hearts" class="hidden">
-          <li>Tab / Shift+Tab: move between cards in your hand</li>
-          <li>Enter or Space: select a card for passing, or play the focused card on your turn</li>
+          <li>Left/Right Arrow (or Up/Down): move between cards in your hand</li>
+          <li>Space: select or unselect a card for passing (maximum of three)</li>
+          <li>Enter, while passing: pass the three selected cards without leaving your hand</li>
+          <li>Enter or Space, during play: play the focused card on your turn</li>
           <li>H: announce your full hand</li>
           <li>T: announce hand number, direction, current player, and whether Hearts are broken</li>
           <li>P: announce the cards played so far in the current trick</li>

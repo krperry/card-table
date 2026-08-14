@@ -25,7 +25,8 @@ Object.assign(appState, {
   heartsHeartsBroken: false,
   heartsTrickNumber: 1,
   heartsHandButtonsHandKey: null,
-  heartsPassButtonsHandKey: null
+  heartsPassButtonsHandKey: null,
+  heartsReceivedCards: []
 });
 
 function heartsCardRank(card) {
@@ -76,7 +77,7 @@ function renderHeartsStatus() {
   if (turnEl) {
     if (appState.heartsPhase === 'passing') {
       turnEl.textContent = appState.heartsSelectedPass.length === 3
-        ? 'Waiting for other players to pass'
+        ? ''
         : 'Select three cards to pass';
     } else if (appState.heartsTurnPlayerId) {
       turnEl.textContent = appState.heartsTurnPlayerId === socket.id
@@ -171,10 +172,31 @@ function heartsFocusFirstEnabledButton(container) {
 }
 
 // Roving tabindex across a row of card buttons: Arrow keys move focus,
-// Home/End jump to the ends. Enter/Space activation is native <button>
-// behavior, so it is not re-implemented here.
-function heartsBindCardGridKeys(container) {
+// Home/End jump to the ends. Space activation is native <button> behavior,
+// so it is not re-implemented here. Enter is native activation too, *unless*
+// the caller supplies onEnter (used by the passing hand so Enter submits the
+// pass instead of toggling the focused card's selection - see
+// renderHeartsPassingHand()).
+//
+// Bound once per container and guarded by a dataset flag rather than
+// re-bound on every render, since the container element itself persists
+// across hand rebuilds (only its button children are replaced) - rebinding
+// on every rebuild would silently stack up duplicate listeners.
+function heartsBindCardGridKeys(container, options) {
+  if (container.dataset.heartsKeysBound) {
+    return;
+  }
+  container.dataset.heartsKeysBound = 'true';
+
+  const onEnter = options && typeof options.onEnter === 'function' ? options.onEnter : null;
+
   container.addEventListener('keydown', function (event) {
+    if (event.key === 'Enter' && onEnter) {
+      event.preventDefault();
+      onEnter();
+      return;
+    }
+
     const buttons = Array.prototype.slice.call(container.querySelectorAll('button'));
     if (!buttons.length) {
       return;
@@ -198,6 +220,30 @@ function heartsBindCardGridKeys(container) {
     buttons.forEach(function (button, index) { button.tabIndex = index === nextIndex ? 0 : -1; });
     buttons[nextIndex].focus();
   });
+}
+
+// Rebuilds a card-button grid in place. If a button inside the container
+// currently has focus, focus is restored to the same position afterward
+// (clamped to the new button count) so replaying/passing a card doesn't
+// silently drop keyboard focus out of the hand - see the module header and
+// CLAUDE.md's Hearts accessibility notes. When focus was NOT already inside
+// the container, focus is left untouched (no forced focus on every render).
+function heartsRebuildCardButtons(container, cards, buildButton) {
+  const hadFocus = container.contains(document.activeElement);
+  const previousButtons = Array.prototype.slice.call(container.querySelectorAll('button'));
+  const focusedIndex = hadFocus ? previousButtons.indexOf(document.activeElement) : -1;
+
+  container.innerHTML = '';
+  cards.forEach(function (card, index) {
+    container.appendChild(buildButton(card, index));
+  });
+
+  const buttons = container.querySelectorAll('button');
+  if (hadFocus && buttons.length) {
+    const restoreIndex = focusedIndex >= 0 ? Math.min(focusedIndex, buttons.length - 1) : 0;
+    Array.prototype.forEach.call(buttons, function (button, index) { button.tabIndex = index === restoreIndex ? 0 : -1; });
+    buttons[restoreIndex].focus();
+  }
 }
 
 // --- Passing UI --------------------------------------------------------------
@@ -231,10 +277,11 @@ function renderHeartsPassingHand() {
     return;
   }
 
+  heartsBindCardGridKeys(container, { onEnter: heartsSubmitPass });
+
   const handKey = appState.heartsHand.join(',');
   if (appState.heartsPassButtonsHandKey !== handKey) {
-    container.innerHTML = '';
-    appState.heartsHand.forEach(function (card, index) {
+    heartsRebuildCardButtons(container, appState.heartsHand, function (card, index) {
       const button = document.createElement('button');
       button.type = 'button';
       button.dataset.card = card;
@@ -246,9 +293,8 @@ function renderHeartsPassingHand() {
       button.appendChild(img);
       heartsUpdatePassButton(button, card);
       bindPressNoFocus(button, function () { heartsTogglePassCard(card, button); });
-      container.appendChild(button);
+      return button;
     });
-    heartsBindCardGridKeys(container);
     appState.heartsPassButtonsHandKey = handKey;
   } else {
     Array.prototype.forEach.call(container.querySelectorAll('button'), function (button) {
@@ -299,24 +345,38 @@ function heartsSubmitPass() {
 // --- Play (trick) UI ---------------------------------------------------------
 
 function heartsPlayAriaLabel(card) {
+  const receivedSuffix = appState.heartsReceivedCards.indexOf(card) !== -1 ? ', received in the pass' : '';
   const legal = !appState.heartsLegalCards || appState.heartsLegalCards.indexOf(card) !== -1;
   if (legal) {
-    return heartsCardName(card) + ', playable';
+    return heartsCardName(card) + ', playable' + receivedSuffix;
   }
 
   if (appState.heartsTrick.length) {
     const ledSuit = heartsCardSuit(appState.heartsTrick[0].card);
-    return heartsCardName(card) + ', unavailable, must follow ' + heartsSuitFullName(ledSuit);
+    return heartsCardName(card) + ', unavailable, must follow ' + heartsSuitFullName(ledSuit) + receivedSuffix;
   }
-  return heartsCardName(card) + ', unavailable right now';
+  return heartsCardName(card) + ', unavailable right now' + receivedSuffix;
 }
 
 function heartsUpdatePlayButton(button, card) {
-  const isMyTurn = appState.heartsTurnPlayerId === socket.id && appState.heartsPhase === 'playing';
+  // 'trick_complete' counts as "my turn" for the trick winner here too - see
+  // the heartsTrickResult handler below, which sets heartsTurnPlayerId to the
+  // winner as soon as the trick result arrives (the winner is always who
+  // leads next), so this label doesn't lag behind and briefly mislabel the
+  // winner's own cards while the ack round-trip is in flight.
+  const isMyTurn = appState.heartsTurnPlayerId === socket.id
+    && (appState.heartsPhase === 'playing' || appState.heartsPhase === 'trick_complete');
   const legal = isMyTurn && (!appState.heartsLegalCards || appState.heartsLegalCards.indexOf(card) !== -1);
   button.setAttribute('aria-disabled', legal ? 'false' : 'true');
   button.classList.toggle('illegal', !legal);
-  button.setAttribute('aria-label', isMyTurn ? heartsPlayAriaLabel(card) : (heartsCardName(card) + ', not your turn'));
+  const received = appState.heartsReceivedCards.indexOf(card) !== -1;
+  button.classList.toggle('received', received);
+  const receivedSuffix = received ? ', received in the pass' : '';
+  // Browsing your hand is not an attempt to play a card, so this label never
+  // says "not your turn" - that announcement only belongs to the actual
+  // heartsPlayResult rejection below, which fires when Enter/click is
+  // pressed on a card while it isn't your turn.
+  button.setAttribute('aria-label', isMyTurn ? heartsPlayAriaLabel(card) : (heartsCardName(card) + receivedSuffix));
 }
 
 function renderHeartsHand() {
@@ -332,10 +392,11 @@ function renderHeartsHand() {
     return;
   }
 
+  heartsBindCardGridKeys(container);
+
   const handKey = appState.heartsHand.join(',');
   if (appState.heartsHandButtonsHandKey !== handKey) {
-    container.innerHTML = '';
-    appState.heartsHand.forEach(function (card, index) {
+    heartsRebuildCardButtons(container, appState.heartsHand, function (card, index) {
       const button = document.createElement('button');
       button.type = 'button';
       button.dataset.card = card;
@@ -347,9 +408,8 @@ function renderHeartsHand() {
       button.appendChild(img);
       heartsUpdatePlayButton(button, card);
       bindPressNoFocus(button, function () { heartsAttemptPlay(card); });
-      container.appendChild(button);
+      return button;
     });
-    heartsBindCardGridKeys(container);
     appState.heartsHandButtonsHandKey = handKey;
   } else {
     Array.prototype.forEach.call(container.querySelectorAll('button'), function (button) {
@@ -359,21 +419,46 @@ function renderHeartsHand() {
 }
 
 function heartsAttemptPlay(card) {
-  if (appState.heartsPhase !== 'playing' || appState.heartsTurnPlayerId !== socket.id) {
-    srSpeak('It is not your turn', 'assertive', { canInterruptLock: true });
-    return;
-  }
-
-  if (appState.heartsLegalCards && appState.heartsLegalCards.indexOf(card) === -1) {
-    srSpeak(heartsCardName(card) + ' is not a legal play right now', 'assertive', { canInterruptLock: true });
-    return;
-  }
-
+  // Card play is server-authoritative (see the module header comment in
+  // games/hearts/index.js), so every attempt is forwarded to the server
+  // rather than pre-validated here. A local "not your turn" pre-check used
+  // to live here, but appState.heartsPhase/heartsTurnPlayerId can briefly lag
+  // the server's real state across two different event handoffs - right
+  // after a player wins a trick and leads the next one (heartsTrickResult
+  // sets phase to 'trick_complete' before the follow-up heartsTurnState
+  // supplies 'playing' + the fresh turnPlayerId) and right after passing
+  // resolves (heartsHand flips phase to 'playing' before heartsTurnState
+  // supplies turnPlayerId for the 2-of-Clubs leader). A fast keypress in
+  // either gap read as a false "It is not your turn" even though the play
+  // was actually correct. The server's heartsPlayResult response is always
+  // fresh, so it is now the sole source of that announcement (and of the
+  // specific illegal-card rejection reasons, e.g. "You must follow Clubs.").
   socket.emit('heartsPlayCard', { card: card });
 }
 
 // --- Top-level render --------------------------------------------------------
 
+// Re-renders the hand/trick/status widgets from whatever is already in
+// appState.hearts* - used by the dedicated socket handlers below, which have
+// each just set those fields directly from their own (freshest-available)
+// event payload. Does NOT touch appState.currentTable.hearts, unlike
+// renderHeartsPanel() below.
+function renderHeartsWidgets() {
+  renderHeartsStatus();
+  renderHeartsTrick();
+  renderHeartsPassingHand();
+  renderHeartsHand();
+}
+
+// Full re-render used by the generic render() in main.js (e.g. on a fresh
+// 'tableState', or when closing an overlay): resyncs appState.hearts* from
+// the current table snapshot first. Deliberately NOT used by the
+// hearts-specific socket handlers below - appState.currentTable.hearts can
+// still reflect a stale pre-event snapshot at the moment one of those
+// handlers runs (a 'tableState' broadcast for the same change may not have
+// arrived yet), so resyncing from it there would clobber the fresher fields
+// the handler just set from its own payload (e.g. a just-completed trick
+// briefly reverting back to mid-trick state - see heartsTrickResult below).
 function renderHeartsPanel() {
   if (!appState.currentTable || appState.currentTable.gameType !== 'hearts') {
     return;
@@ -392,10 +477,7 @@ function renderHeartsPanel() {
     appState.heartsTurnPlayerName = hearts.turnPlayerName;
   }
 
-  renderHeartsStatus();
-  renderHeartsTrick();
-  renderHeartsPassingHand();
-  renderHeartsHand();
+  renderHeartsWidgets();
 }
 
 // --- Keyboard shortcuts --------------------------------------------------------
@@ -493,6 +575,8 @@ socket.on('heartsHand', function (payload) {
     return;
   }
 
+  const receivedCards = Array.isArray(payload.receivedCards) ? payload.receivedCards : [];
+
   appState.heartsHand = payload.hand;
   appState.heartsHandNumber = payload.handNumber;
   appState.heartsDirection = payload.direction;
@@ -500,11 +584,45 @@ socket.on('heartsHand', function (payload) {
   appState.heartsSelectedPass = [];
   appState.heartsHandButtonsHandKey = null;
   appState.heartsPassButtonsHandKey = null;
+  // Cleared by the next heartsHand event with no receivedCards - which
+  // naturally happens the moment this player plays their own first card
+  // (see the per-play heartsHand emit in games/hearts/index.js), so the
+  // "you just received these" highlight fades out once play is underway.
+  appState.heartsReceivedCards = receivedCards;
 
-  renderHeartsPanel();
+  // For a hold hand or the moment passing resolves, this is the first event
+  // this client sees for the new hand, arriving with phase already 'playing'
+  // - the follow-up heartsTurnState event confirming turnPlayerId lands a
+  // moment later. Without consuming payload.turnPlayerId here too, the
+  // render below would use the previous hand's/trick's stale turnPlayerId
+  // for one frame, showing the 2-of-Clubs leader's own hand as "not your
+  // turn" right as focus moves onto it (see sendHands() in
+  // games/hearts/index.js for why the server now always includes it).
+  if (payload.phase === 'playing' && Object.prototype.hasOwnProperty.call(payload, 'turnPlayerId')) {
+    appState.heartsTurnPlayerId = payload.turnPlayerId;
+    appState.heartsTurnPlayerName = payload.turnPlayerName;
+  }
+
+  renderHeartsWidgets();
 
   if (payload.phase === 'passing') {
     srSpeak('New hand. Your hand: ' + payload.hand.map(heartsCardName).join(', '), 'polite', { canInterruptLock: true });
+  } else if (payload.phase === 'playing') {
+    // This event fires both once per hand (right as passing resolves into
+    // play, or immediately for a Hold hand) and after every card this player
+    // plays - in both cases the hand contents just changed under the
+    // player's feet, so re-anchoring focus in the hand matches the "return
+    // focus to the game area after game-state transitions" rule.
+    if (receivedCards.length) {
+      // Passing just resolved - announce exactly what came in for
+      // screen-reader users, since the generic 'actionNotice' broadcast
+      // ("Cards have been passed.") is the same for every seat and never
+      // says which cards a given player received.
+      srSpeak('You received ' + receivedCards.map(heartsCardName).join(', ') + '.', 'assertive', { canInterruptLock: true });
+    }
+    window.requestAnimationFrame(function () {
+      heartsFocusFirstEnabledButton(document.getElementById('hearts-hand'));
+    });
   }
 });
 
@@ -514,7 +632,7 @@ socket.on('heartsPassPrompt', function (payload) {
   }
   appState.heartsPhase = 'passing';
   appState.heartsDirection = payload.direction;
-  renderHeartsPanel();
+  renderHeartsWidgets();
 
   const message = payload.direction === 'hold'
     ? 'Hold hand. No cards will be passed.'
@@ -532,7 +650,7 @@ socket.on('heartsPassResult', function (payload) {
   }
   srSpeak(payload.message || (payload.success ? 'Pass submitted' : 'Pass failed'), payload.success ? 'polite' : 'assertive', { canInterruptLock: true });
   if (payload.success) {
-    renderHeartsPanel();
+    renderHeartsWidgets();
   }
 });
 
@@ -540,8 +658,6 @@ socket.on('heartsTurnState', function (payload) {
   if (!payload) {
     return;
   }
-
-  const becameMyTurn = payload.turnPlayerId === socket.id && appState.heartsTurnPlayerId !== socket.id;
 
   appState.heartsPhase = 'playing';
   appState.heartsTrickNumber = payload.trickNumber;
@@ -555,10 +671,24 @@ socket.on('heartsTurnState', function (payload) {
     appState.heartsLegalCards = null;
   }
 
-  renderHeartsPanel();
+  renderHeartsWidgets();
 
-  if (becameMyTurn) {
-    srSpeak('Your turn.', 'assertive', { canInterruptLock: true, lockMs: 900 });
+  // The server already composed the single combined announcement this seat
+  // needs for this event (who just played plus "Your turn", or the 2C-leader
+  // "You start", or nothing at all when another player merely has the turn -
+  // see buildTurnMessage() in games/hearts/index.js). No generic "it's X's
+  // turn" fallback is spoken here on purpose.
+  if (payload.message) {
+    let message = payload.message;
+    if (payload.startsHand && appState.heartsReceivedCards.length) {
+      // When passing has just resolved into this player being the 2C leader,
+      // this event lands right behind the heartsHand event that scheduled
+      // the "You received ..." announcement, and srSpeak's single
+      // ARIA-live-region slot means whichever call runs last wins - so fold
+      // the received-cards text in here rather than losing it.
+      message = 'You received ' + appState.heartsReceivedCards.map(heartsCardName).join(', ') + '. ' + message;
+    }
+    srSpeak(message, 'assertive', { canInterruptLock: true, lockMs: 900 });
   }
 });
 
@@ -569,6 +699,16 @@ socket.on('heartsPlayResult', function (payload) {
   if (!payload.success) {
     srSpeak(payload.message || 'Play rejected', 'assertive', { canInterruptLock: true });
     playErrorTone();
+    return;
+  }
+  // The player already knows which card they just selected and played, so a
+  // successful own play is never restated back to them - only genuinely new
+  // state (e.g. Hearts breaking) is spoken, and only when the server didn't
+  // leave it out because it's about to be folded into the more
+  // decision-relevant heartsTrickResult announcement instead (see
+  // performPlayCard() in games/hearts/index.js).
+  if (payload.message) {
+    srSpeak(payload.message, 'assertive', { canInterruptLock: true });
   }
 });
 
@@ -580,10 +720,58 @@ socket.on('heartsTrickResult', function (payload) {
   appState.heartsTrick = [];
   appState.heartsLastTrick = { cards: payload.trick, winnerId: payload.winnerId, winnerName: payload.winnerName };
   appState.heartsPhase = 'trick_complete';
-  renderHeartsPanel();
+  // The trick winner always leads the next trick, so this is already known -
+  // set it now rather than waiting for the follow-up heartsTurnState event,
+  // so the hand's turn/aria-label state (and heartsAttemptPlay, for a fast
+  // keypress) is correct immediately instead of briefly showing the previous
+  // trick's last actor as still "on turn".
+  appState.heartsTurnPlayerId = payload.winnerId;
+  appState.heartsTurnPlayerName = payload.winnerName;
+  // The just-finished trick's legal-card set (e.g. "must follow Diamonds")
+  // no longer applies to the brand-new trick that's about to start - without
+  // clearing it here, the winner's hand would render with stale
+  // aria-disabled/aria-label state (falsely marking their own playable cards
+  // "unavailable") for the gap between this event and the follow-up
+  // heartsTurnState, which is the one that supplies the real legal plays for
+  // an opening lead. heartsPlayAriaLabel()/heartsUpdatePlayButton() both
+  // treat a null heartsLegalCards as "nothing ruled out yet" (see the
+  // heartsTurnState handler's own else-branch, which nulls it the same way
+  // for a seat that just lost the turn).
+  appState.heartsLegalCards = null;
+  renderHeartsWidgets();
 
-  const pointsText = payload.points > 0 ? (' ' + payload.winnerName + ' takes ' + payload.points + (payload.points === 1 ? ' point.' : ' points.')) : '';
-  srSpeak('Trick complete. ' + payload.winnerName + ' wins the trick.' + pointsText, 'assertive', { canInterruptLock: true, lockMs: 1200 });
+  // One combined, per-recipient announcement: what the last card played was
+  // (skipped for the player who just played it - they already know), whether
+  // Hearts just broke, and the trick outcome. The winner leads the next
+  // trick, so "Your lead" tells them what to do next - except on the hand's
+  // final trick, where there is no next lead to promise (see isFinalTrick in
+  // performPlayCard()). Points are deliberately left out, per the Hearts
+  // screen-reader announcement spec's minimal-example wording - they're
+  // available on demand via the score shortcuts.
+  const isWinner = payload.winnerId === socket.id;
+  const isLastPlayer = payload.lastPlayerId === socket.id;
+  const lastPlayerWon = payload.lastPlayerId === payload.winnerId;
+  const breakClause = payload.justBroke ? 'Hearts are now broken. ' : '';
+  const outcomeClause = isWinner
+    ? (payload.isFinalTrick ? 'You take the trick.' : 'You take the trick. Your lead.')
+    : (payload.winnerName + ' takes the trick.');
+
+  let message;
+  if (!isWinner && !isLastPlayer && lastPlayerWon && !payload.justBroke) {
+    // The same (other) player both played the last card and won the trick -
+    // say it as one sentence ("Nina plays the Eight of Diamonds and takes
+    // the trick.") instead of naming them twice back to back. Skipped when
+    // Hearts also just broke on that card, so the break clause can sit
+    // between two clean sentences rather than splitting this one in half.
+    message = payload.lastPlayerName + ' plays ' + heartsCardName(payload.lastCard) + ' and takes the trick.';
+  } else {
+    const playClause = (payload.lastPlayerName && !isLastPlayer)
+      ? (payload.lastPlayerName + ' plays ' + heartsCardName(payload.lastCard) + '. ')
+      : '';
+    message = playClause + breakClause + outcomeClause;
+  }
+
+  srSpeak(message, 'assertive', { canInterruptLock: true, lockMs: 1200 });
 
   // The trick has already been rendered and announced above, so the player
   // has had a chance to see/hear it before it clears - no arbitrary timer is
