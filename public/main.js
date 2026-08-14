@@ -15,7 +15,7 @@ const rememberTokenStorageKey = 'unoRememberToken';
 const GAME_CATALOG = {
   uno: { type: 'uno', name: 'Lumo', playable: true, description: 'Join a live Lumo table.' },
   hearts: { type: 'hearts', name: 'Hearts', playable: true, description: 'Join a live Hearts table.' },
-  spades: { type: 'spades', name: 'Spades', playable: false, description: 'Spades is not implemented yet.' },
+  spades: { type: 'spades', name: 'Spades', playable: true, description: 'Join a live Spades table.' },
   cribbage: { type: 'cribbage', name: 'Cribbage', playable: false, description: 'Cribbage is not implemented yet.' }
 };
 
@@ -127,6 +127,9 @@ const el = {
   selectUnoBtn: document.getElementById('select-uno-btn'),
   selectHeartsBtn: document.getElementById('select-hearts-btn'),
   selectSpadesBtn: document.getElementById('select-spades-btn'),
+  spadesPanel: document.getElementById('spades-panel'),
+  spadesTableSettings: document.getElementById('spades-table-settings'),
+  newTableTargetScore: document.getElementById('new-table-target-score'),
   selectCribbageBtn: document.getElementById('select-cribbage-btn'),
   helpOverlay: document.getElementById('help-overlay'),
   closeHelpBtn: document.getElementById('close-help-btn'),
@@ -756,6 +759,7 @@ function createTable() {
   const maxRounds = parseInt(el.newTableMaxRounds && el.newTableMaxRounds.value, 10);
   const computerPlayers = parseInt(el.newTableComputerPlayers && el.newTableComputerPlayers.value, 10);
   const pointsToEndGame = parseInt(el.newTablePointsToEndGame && el.newTablePointsToEndGame.value, 10);
+  const targetScore = parseInt(el.newTableTargetScore && el.newTableTargetScore.value, 10);
 
   socket.emit('createTable', {
     name: tableName,
@@ -767,7 +771,8 @@ function createTable() {
     allowWildDrawFourStacking: !!(el.allowWildDrawFourStacking && el.allowWildDrawFourStacking.checked),
     computerPlayers: Number.isFinite(computerPlayers) ? computerPlayers : undefined,
     computerSkill: el.newTableComputerSkill ? el.newTableComputerSkill.value : undefined,
-    pointsToEndGame: Number.isFinite(pointsToEndGame) ? pointsToEndGame : undefined
+    pointsToEndGame: Number.isFinite(pointsToEndGame) ? pointsToEndGame : undefined,
+    targetScore: Number.isFinite(targetScore) ? targetScore : undefined
   });
 }
 
@@ -901,15 +906,35 @@ function isHeartsContext() {
   return isHeartsTable() || appState.selectedGameType === 'hearts';
 }
 
+function isSpadesTable() {
+  return !!(appState.currentTable && appState.currentTable.gameType === 'spades');
+}
+
+function isSpadesContext() {
+  return isSpadesTable() || appState.selectedGameType === 'spades';
+}
+
+// Whichever game the player is currently looking at, table or no table -
+// either seated at a table (gameType is authoritative there) or still on the
+// shared create-table/lobby screen with a game selected. Falls back to 'uno'
+// (Lumo), the default/original game, when nothing else is known yet.
+function getActiveGameType() {
+  if (appState.currentTable && appState.currentTable.gameType) {
+    return appState.currentTable.gameType;
+  }
+  return appState.selectedGameType || 'uno';
+}
+
 const RULES_BY_GAME = {
   hearts: { file: 'hearts-rules.md', title: 'Hearts Rules', openedAnnouncement: 'Hearts rules opened' },
+  spades: { file: 'spades-rules.md', title: 'Spades Rules', openedAnnouncement: 'Spades rules opened' },
   uno: { file: 'lumo-rules.md', title: 'Lumo Rules', openedAnnouncement: 'Lumo rules opened' }
 };
 
 const rulesHtmlCache = {};
 
 function getActiveRulesDefinition() {
-  return RULES_BY_GAME[isHeartsContext() ? 'hearts' : 'uno'];
+  return RULES_BY_GAME[getActiveGameType()] || RULES_BY_GAME.uno;
 }
 
 function escapeHtml(text) {
@@ -1050,9 +1075,12 @@ function openHelpOverlay() {
   appState.helpOpen = true;
   const heartsHelp = document.getElementById('help-content-hearts');
   const lumoHelp = document.getElementById('help-content-lumo');
-  if (heartsHelp && lumoHelp) {
-    heartsHelp.classList.toggle('hidden', !isHeartsTable());
-    lumoHelp.classList.toggle('hidden', isHeartsTable());
+  const spadesHelp = document.getElementById('help-content-spades');
+  const activeGameType = getActiveGameType();
+  if (heartsHelp && lumoHelp && spadesHelp) {
+    heartsHelp.classList.toggle('hidden', activeGameType !== 'hearts');
+    spadesHelp.classList.toggle('hidden', activeGameType !== 'spades');
+    lumoHelp.classList.toggle('hidden', activeGameType === 'hearts' || activeGameType === 'spades');
   }
   el.helpOverlay.classList.remove('hidden');
   el.closeHelpBtn.focus();
@@ -1063,7 +1091,9 @@ function closeHelpOverlay() {
   el.helpOverlay.classList.add('hidden');
   if (appState.currentTable && appState.gameStatus === 'in_game' && isHeartsTable() && el.heartsPanel) {
     el.heartsPanel.focus();
-  } else if (appState.currentTable && appState.gameStatus === 'in_game' && !isHeartsTable()) {
+  } else if (appState.currentTable && appState.gameStatus === 'in_game' && isSpadesTable() && el.spadesPanel) {
+    el.spadesPanel.focus();
+  } else if (appState.currentTable && appState.gameStatus === 'in_game' && !isHeartsTable() && !isSpadesTable()) {
     focusBoardForA11y({
       announceOnFocus: true
     });
@@ -1139,13 +1169,19 @@ function closeAnnouncementOverlay(restoreFocus) {
     socket.emit('heartsAckHandSummary');
   }
 
+  if (wasOpen && kind === 'spadesHandSummary') {
+    socket.emit('spadesAckHandSummary');
+  }
+
   if (restoreFocus === false) {
     return;
   }
 
   if (appState.currentTable && appState.gameStatus === 'in_game' && isHeartsTable() && el.heartsPanel) {
     el.heartsPanel.focus();
-  } else if (appState.currentTable && appState.gameStatus === 'in_game' && !isHeartsTable()) {
+  } else if (appState.currentTable && appState.gameStatus === 'in_game' && isSpadesTable() && el.spadesPanel) {
+    el.spadesPanel.focus();
+  } else if (appState.currentTable && appState.gameStatus === 'in_game' && !isHeartsTable() && !isSpadesTable()) {
     focusBoardForA11y({
       announceOnFocus: true
     });
@@ -1172,18 +1208,24 @@ function render() {
   if (el.gamePickerSummary) {
     el.gamePickerSummary.textContent = appState.selectedGameType
       ? 'Selected game: ' + (getGameDefinition(appState.selectedGameType) || { name: 'Lumo' }).name
-      : 'Pick a card game to continue. Lumo and Hearts are available now; the others are accessible previews for later work.';
+      : 'Pick a card game to continue. Lumo, Hearts, and Spades are available now; Cribbage is an accessible preview for later work.';
   }
 
-  const isHearts = isHeartsContext();
+  const activeGameType = getActiveGameType();
+  const isHearts = activeGameType === 'hearts';
+  const isSpades = activeGameType === 'spades';
+  const activeRulesName = RULES_BY_GAME[activeGameType] ? RULES_BY_GAME[activeGameType].title.replace(/ Rules$/, '') : 'Lumo';
   if (el.lumoTableSettings) {
-    el.lumoTableSettings.classList.toggle('hidden', isHearts);
+    el.lumoTableSettings.classList.toggle('hidden', isHearts || isSpades);
   }
   if (el.heartsTableSettings) {
     el.heartsTableSettings.classList.toggle('hidden', !isHearts);
   }
+  if (el.spadesTableSettings) {
+    el.spadesTableSettings.classList.toggle('hidden', !isSpades);
+  }
   if (el.openRulesBtn) {
-    el.openRulesBtn.textContent = 'Read ' + (isHearts ? 'Hearts' : 'Lumo') + ' Rules';
+    el.openRulesBtn.textContent = 'Read ' + activeRulesName + ' Rules';
   }
 
   if (appState.currentTable) {
@@ -1191,12 +1233,28 @@ function render() {
       if (el.gamePanel) {
         el.gamePanel.classList.add('hidden');
       }
+      if (el.spadesPanel) {
+        el.spadesPanel.classList.add('hidden');
+      }
       if (el.heartsPanel) {
         el.heartsPanel.classList.toggle('hidden', appState.gameStatus !== 'in_game');
+      }
+    } else if (isSpades) {
+      if (el.gamePanel) {
+        el.gamePanel.classList.add('hidden');
+      }
+      if (el.heartsPanel) {
+        el.heartsPanel.classList.add('hidden');
+      }
+      if (el.spadesPanel) {
+        el.spadesPanel.classList.toggle('hidden', appState.gameStatus !== 'in_game');
       }
     } else {
       if (el.heartsPanel) {
         el.heartsPanel.classList.add('hidden');
+      }
+      if (el.spadesPanel) {
+        el.spadesPanel.classList.add('hidden');
       }
       el.gamePanel.classList.toggle('hidden', appState.gameStatus !== 'in_game');
     }
@@ -1210,6 +1268,11 @@ function render() {
           ? ' | Hand ' + appState.currentTable.hearts.handNumber
           : '';
         el.tableMatchSettings.textContent = 'Points to end game: ' + (matchSettings.pointsToEndGame || 100) + handText;
+      } else if (isSpades) {
+        const handText = appState.gameStatus === 'in_game' && appState.currentTable.spades
+          ? ' | Hand ' + appState.currentTable.spades.handNumber
+          : '';
+        el.tableMatchSettings.textContent = 'Target score: ' + (matchSettings.targetScore || 500) + handText;
       } else {
         const roundText = appState.gameStatus === 'in_game' && typeof appState.currentTable.roundNumber === 'number'
           ? ' | This is round ' + appState.currentTable.roundNumber + ' of ' + matchSettings.maxRounds
@@ -1226,9 +1289,10 @@ function render() {
       }
     }
 
-    if (isHearts) {
-      // Hearts always fills to exactly four seats with computer players when
-      // the host starts, so there is no minimum-player gate to enforce here.
+    if (isHearts || isSpades) {
+      // Hearts and Spades both always fill to exactly four seats with
+      // computer players when the host starts, so there is no minimum-player
+      // gate to enforce here.
       el.startGameBtn.disabled = !appState.isHost || appState.gameStatus === 'in_game';
     } else {
       const computerPlayerCount = (appState.currentTable.matchSettings && appState.currentTable.matchSettings.computerPlayers) || 0;
@@ -1243,7 +1307,7 @@ function render() {
       el.kickPlayerBtn.disabled = !hasOtherPlayers;
     }
     setTableStatus(appState.tableStatusMessage, appState.tableStatusTone);
-    if (!isHearts) {
+    if (!isHearts && !isSpades) {
       setPlayDirectionIndicator();
     } else if (el.playDirection) {
       el.playDirection.textContent = '';
@@ -1261,6 +1325,9 @@ function render() {
   renderPlayHistory();
   if (typeof renderHeartsPanel === 'function') {
     renderHeartsPanel();
+  }
+  if (typeof renderSpadesPanel === 'function') {
+    renderSpadesPanel();
   }
 }
 
@@ -1305,16 +1372,18 @@ function renderPlayerSummary() {
   }
 
   const isHearts = appState.currentTable.gameType === 'hearts';
+  const isSpades = appState.currentTable.gameType === 'spades';
   const heartsTurnPlayerId = isHearts && appState.currentTable.hearts ? appState.currentTable.hearts.turnPlayerId : null;
+  const spadesTurnPlayerId = isSpades && appState.currentTable.spades ? appState.currentTable.spades.turnPlayerId : null;
 
-  appState.currentTable.players.forEach(function (player) {
+  appState.currentTable.players.forEach(function (player, index) {
     const li = document.createElement('li');
     const label = document.createElement('span');
     const unoBadge = document.createElement('span');
     const details = document.createElement('span');
     const isCurrentTurn = appState.gameStatus === 'in_game'
-      && (player.id === appState.currentTurnPlayerId || player.id === heartsTurnPlayerId);
-    const hasUno = !isHearts && appState.gameStatus === 'in_game' && player.cardCount === 1;
+      && (player.id === appState.currentTurnPlayerId || player.id === heartsTurnPlayerId || player.id === spadesTurnPlayerId);
+    const hasUno = !isHearts && !isSpades && appState.gameStatus === 'in_game' && player.cardCount === 1;
     const tags = [];
     const totalPoints = typeof player.score === 'number' ? player.score : 0;
 
@@ -1331,6 +1400,16 @@ function renderPlayerSummary() {
     if (hasUno) {
       tags.push('Lumo');
       li.classList.add('lumo');
+    }
+    // Spades is a fixed-partnership game (seats 0 & 2 vs. seats 1 & 3, see
+    // games/spades/rules.js's DEFAULT_TEAMS) - group the two team's rows
+    // visually (see .spades-team-a/.spades-team-b in style.css) and label
+    // each row's team so the shared score column ("Score: N") reads as a
+    // team total rather than a personal one.
+    if (isSpades) {
+      const teamLabel = index % 2 === 0 ? 'Team A' : 'Team B';
+      tags.push(teamLabel);
+      li.classList.add(index % 2 === 0 ? 'spades-team-a' : 'spades-team-b');
     }
 
     const countText = appState.gameStatus === 'in_game'
@@ -1604,16 +1683,18 @@ socket.on('tableState', function (payload) {
     if (!appState.tableStatusMessage || appState.tableStatusTone !== 'success') {
       setTableStatus('Waiting for the host to start the next game.', 'info');
     }
-  } else if (!appState.currentTurnPlayerId && !isHeartsTable()) {
+  } else if (!appState.currentTurnPlayerId && !isHeartsTable() && !isSpadesTable()) {
     // currentTurnPlayerId/appState.turn are Lumo-only fields (set from
-    // lumo-client.js) - Hearts tracks turn state separately via
-    // appState.heartsTurnPlayerId and announces it itself (see
-    // heartsTurnState in hearts-client.js), so this branch must not run for
-    // Hearts tables. Without this guard it fired on every single tableState
-    // broadcast during Hearts play (currentTurnPlayerId is always falsy for
-    // Hearts), overwriting the real turn status with a stale "waiting for
-    // the next turn update" message even when it actually was the viewer's
-    // turn, and auto-closing/acking any open hand-summary overlay early.
+    // lumo-client.js) - Hearts and Spades both track turn state separately
+    // (appState.heartsTurnPlayerId / appState.spadesTurnPlayerId) and
+    // announce it themselves (see heartsTurnState/spadesTurnState in their
+    // respective client files), so this branch must not run for those
+    // tables. Without this guard it fired on every single tableState
+    // broadcast during Hearts/Spades play (currentTurnPlayerId is always
+    // falsy for them), overwriting the real turn status with a stale
+    // "waiting for the next turn update" message even when it actually was
+    // the viewer's turn, and auto-closing/acking any open hand-summary
+    // overlay early.
     appState.playDirection = normalizeDirection(appState.playDirection);
     const isRoundOrMatchDialogOpen = appState.announcementOpen
       && (appState.announcementKind === 'roundSummary' || appState.announcementKind === 'matchSummary');
@@ -1627,14 +1708,16 @@ socket.on('tableState', function (payload) {
 
   if (enteredInGame) {
     clearPlayHistory();
-    if (isHeartsTable()) {
-      // Hearts manages its own focus once the hand/passing UI actually
-      // renders (see heartsPassPrompt/heartsHand in hearts-client.js) -
-      // focusing el.heartsPanel here as well would race that more specific
-      // focus call (both scheduled via requestAnimationFrame) and could win,
-      // leaving focus stuck on the generic panel instead of the first dealt
-      // card. focusBoardForA11y() below is Lumo-specific (it focuses the
-      // canvas), so this branch intentionally does nothing for Hearts.
+    if (isHeartsTable() || isSpadesTable()) {
+      // Hearts and Spades both manage their own focus once the hand/bidding
+      // UI actually renders (see heartsPassPrompt/heartsHand in
+      // hearts-client.js, and spadesBidState/spadesTurnState in
+      // spades-client.js) - focusing el.heartsPanel/el.spadesPanel here as
+      // well would race that more specific focus call (both scheduled via
+      // requestAnimationFrame) and could win, leaving focus stuck on the
+      // generic panel instead of the first dealt card. focusBoardForA11y()
+      // below is Lumo-specific (it focuses the canvas), so this branch
+      // intentionally does nothing for Hearts/Spades.
     } else {
       window.requestAnimationFrame(function () {
         focusBoardForA11y({

@@ -137,6 +137,14 @@
           </div>
           <p class="hint">Hearts always seats exactly four players. If fewer than four have joined, starting the table fills the rest with computer players.</p>
         </div>
+        <div id="spades-table-settings" class="hidden">
+          <div class="row">
+            <label class="inline-label" for="new-table-target-score">Target score to win
+              <input id="new-table-target-score" type="number" min="100" max="1000" step="1" value="500">
+            </label>
+          </div>
+          <p class="hint">Spades always seats exactly four players in fixed partnerships: seats 1 &amp; 3 are partners, seats 2 &amp; 4 are partners. If fewer than four have joined, starting the table fills the rest with computer players.</p>
+        </div>
         <div class="row">
           <button id="create-table-btn" type="button">Create Table</button>
         </div>
@@ -218,6 +226,40 @@
           </p>
           <p class="hint">Mouse, touch, and keyboard are all supported. Press question mark for keyboard commands.</p>
         </div>
+
+        <div id="spades-panel" class="hidden" tabindex="-1">
+          <div id="spades-status" class="spades-status" aria-label="Spades game status">
+            <p id="spades-status-hand"></p>
+            <p id="spades-status-partner"></p>
+            <p id="spades-status-turn"></p>
+            <p id="spades-status-bids"></p>
+            <p id="spades-status-broken"></p>
+            <p id="spades-status-trick"></p>
+            <p id="spades-status-bags"></p>
+            <p id="spades-status-score"></p>
+          </div>
+
+          <div id="spades-bidding-area" class="spades-section hidden" aria-labelledby="spades-bidding-title">
+            <h3 id="spades-bidding-title">Place your bid</h3>
+            <p id="spades-bidding-instructions" class="hint">Use the arrow keys to move between bid choices, then press Enter or Space to submit that bid (Nil means a bid to take zero tricks).</p>
+            <div id="spades-bid-grid" class="spades-bid-grid" role="group" aria-label="Choose your bid"></div>
+          </div>
+
+          <div id="spades-trick-area" class="spades-section hidden" aria-labelledby="spades-trick-title">
+            <h3 id="spades-trick-title">Current Trick</h3>
+            <ul id="spades-trick-list" class="spades-trick-list" aria-label="Cards played to the current trick"></ul>
+          </div>
+
+          <div id="spades-hand-area" class="spades-section hidden" aria-labelledby="spades-hand-title">
+            <h3 id="spades-hand-title">Your Hand</h3>
+            <div id="spades-hand" class="spades-hand" role="group" aria-label="Your hand"></div>
+          </div>
+
+          <p id="spades-help" class="visually-hidden">
+            Use the arrow keys to move between bid choices or cards. Press Enter or Space to submit the focused bid, or to play the focused card during play. Press question mark to open the keyboard commands dialog.
+          </p>
+          <p class="hint">Mouse, touch, and keyboard are all supported. Press question mark for keyboard commands.</p>
+        </div>
       </section>
     </main>
 
@@ -259,6 +301,21 @@
           <li>P: announce the cards played so far in the current trick</li>
           <li>S: announce your score</li>
           <li>Shift+S: announce every player's score, lowest to highest</li>
+          <li>?: open this help</li>
+          <li>Escape: close this help</li>
+        </ul>
+        <ul id="help-content-spades" class="hidden">
+          <li>Left/Right Arrow (or Up/Down): move between bid choices, or between cards in your hand</li>
+          <li>Home/End: jump to the first/last bid choice or card</li>
+          <li>Enter or Space, while bidding: submit the focused bid (Nil is a bid to take zero tricks)</li>
+          <li>Enter or Space, during play: play the focused card on your turn</li>
+          <li>H: announce your full hand</li>
+          <li>T: announce hand number, whose turn it is, trick number, and whether Spades are broken</li>
+          <li>P: announce the cards played so far in the current trick</li>
+          <li>B: announce every bid placed so far this hand</li>
+          <li>R: announce your partner's name</li>
+          <li>S: announce your team's score</li>
+          <li>Shift+S: announce both teams' scores</li>
           <li>?: open this help</li>
           <li>Escape: close this help</li>
         </ul>
@@ -323,6 +380,7 @@
     <script src="main.js"></script>
     <script src="games/lumo/lumo-client.js"></script>
     <script src="games/hearts/hearts-client.js"></script>
+    <script src="games/spades/spades-client.js"></script>
     <!-- Game client modules share main.js's scope (see lumo-client.js's header
          comment); init() is called last, once every game module has finished
          registering its socket handlers. -->

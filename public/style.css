@@ -232,6 +232,18 @@ button:disabled {
   border-left-color: #d6453d;
 }
 
+/* Spades is a fixed-partnership game - tie each team's two rows together
+   visually with a shared border color (seats 0 & 2 are Team A, seats 1 & 3
+   are Team B, see games/spades/rules.js's DEFAULT_TEAMS) so the shared
+   "Score: N" value on each row reads as a team total, not a personal one. */
+.player-summary li.spades-team-a {
+  border-left-color: #6a4fb6;
+}
+
+.player-summary li.spades-team-b {
+  border-left-color: #1a8fa0;
+}
+
 .lumo-badge {
   display: inline-block;
   margin-left: 6px;
@@ -759,4 +771,140 @@ canvas {
 
 #hearts-pass-btn {
   margin-top: 10px;
+}
+
+/* Spades panel - mirrors the .hearts-* rule set above (same fully
+   game-namespaced, self-contained structure), plus a bid grid for the
+   turn-sequenced bidding UI that Hearts has no equivalent of. */
+
+#spades-panel {
+  margin-top: 10px;
+  padding: 10px;
+  border-radius: 10px;
+  background: #10ac84;
+}
+
+#spades-panel:focus {
+  outline: 2px solid #f8fff6;
+  outline-offset: 2px;
+}
+
+.spades-status {
+  margin: 0 0 12px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: #ecf6f4;
+  border: 1px solid #b7d2cc;
+}
+
+.spades-status p {
+  margin: 4px 0;
+  color: #1d4342;
+  font-weight: 600;
+}
+
+.spades-status p:empty {
+  display: none;
+}
+
+.spades-section {
+  margin-bottom: 14px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: #ecf6f4;
+  border: 1px solid #b7d2cc;
+}
+
+.spades-section h3 {
+  margin: 0 0 8px;
+  color: #123b39;
+}
+
+.spades-hand {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.spades-hand button,
+.spades-trick-list img {
+  background: #fff;
+  border: 2px solid #a7bdb7;
+  border-radius: 8px;
+  padding: 2px;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.spades-hand button {
+  flex: 1 1 0;
+  min-width: 46px;
+  max-width: 120px;
+}
+
+.spades-hand button img {
+  width: 100%;
+  height: auto;
+  display: block;
+  pointer-events: none;
+}
+
+.spades-hand button:focus-visible {
+  outline: 3px solid #0d7c67;
+  outline-offset: 1px;
+}
+
+.spades-hand button[aria-disabled="true"] {
+  opacity: 0.4;
+}
+
+.spades-bid-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.spades-bid-grid button {
+  background: #fff;
+  border: 2px solid #a7bdb7;
+  border-radius: 8px;
+  padding: 8px 4px;
+  min-width: 46px;
+  cursor: pointer;
+  touch-action: manipulation;
+  font-weight: 700;
+}
+
+.spades-bid-grid button:focus-visible {
+  outline: 3px solid #0d7c67;
+  outline-offset: 1px;
+}
+
+.spades-trick-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.spades-trick-list li {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  color: #234544;
+  width: 130px;
+}
+
+.spades-trick-list img {
+  width: 110px;
+  height: auto;
+}
+
+.spades-trick-winner {
+  width: auto !important;
+  font-weight: 700;
 }
