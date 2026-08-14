@@ -199,7 +199,7 @@ test('the server rejects an illegal card play, leaves the table state unchanged,
 
 test('a solo-started Hearts table (three bots) plays a full hand to completion via bot autoplay', async () => {
   const port = 3164;
-  const child = startChild(port, { BOT_MOVE_DELAY_MS: '5' });
+  const child = startChild(port, { BOT_MOVE_DELAY_MS: '5', BOT_TRICK_PAUSE_MS: '5' });
   let host;
 
   try {
@@ -234,7 +234,7 @@ test('a solo-started Hearts table (three bots) plays a full hand to completion v
 
 test('a Hearts game ends once a hand pushes a player to the configured points-to-end-game threshold, and the lowest score wins', async () => {
   const port = 3165;
-  const child = startChild(port, { BOT_MOVE_DELAY_MS: '5' });
+  const child = startChild(port, { BOT_MOVE_DELAY_MS: '5', BOT_TRICK_PAUSE_MS: '5' });
   let host;
 
   try {

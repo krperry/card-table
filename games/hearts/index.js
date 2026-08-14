@@ -29,6 +29,13 @@ module.exports = function createHeartsGame(deps) {
   const MAX_POINTS_TO_END_GAME = 500;
   const DEFAULT_POINTS_TO_END_GAME = 100;
   const BOT_MOVE_DELAY_MS = Math.max(0, parseInt(process.env.BOT_MOVE_DELAY_MS || '900', 10));
+  // Gives sighted players a chance to actually see all four cards on the
+  // table (via the hearts-trick-area panel) before the board clears for the
+  // next trick, specifically when a bot won it - a bot winner never needs to
+  // wait on a human ack the way a human winner's screen naturally does while
+  // they read the result, so without this pause an all-bot stretch of tricks
+  // could otherwise flash by with nothing to slow it down for onlookers.
+  const BOT_TRICK_PAUSE_MS = Math.max(0, parseInt(process.env.BOT_TRICK_PAUSE_MS || '2000', 10));
 
   function normalizeMatchSettings(payload) {
     return {
@@ -546,18 +553,31 @@ module.exports = function createHeartsGame(deps) {
     table.game.pendingTrickAcks = null;
     const winnerIndex = table.game.pendingWinnerIndex;
     table.game.pendingWinnerIndex = null;
+    const winner = table.players[winnerIndex];
 
-    if (table.game.trickNumber >= 13) {
-      finishHand(table);
-      return;
+    function advance() {
+      if (tables[table.id] !== table || table.status !== 'in_game') {
+        return;
+      }
+
+      if (table.game.trickNumber >= 13) {
+        finishHand(table);
+        return;
+      }
+
+      table.game.trickNumber += 1;
+      table.game.leaderIndex = winnerIndex;
+      table.game.turnIndex = winnerIndex;
+      table.game.phase = 'playing';
+      emitTableState(table);
+      emitHeartsTurn(table);
     }
 
-    table.game.trickNumber += 1;
-    table.game.leaderIndex = winnerIndex;
-    table.game.turnIndex = winnerIndex;
-    table.game.phase = 'playing';
-    emitTableState(table);
-    emitHeartsTurn(table);
+    if (winner && winner.isBot && BOT_TRICK_PAUSE_MS > 0) {
+      setTimeout(advance, BOT_TRICK_PAUSE_MS);
+    } else {
+      advance();
+    }
   }
 
   function finishHand(table) {

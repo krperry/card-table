@@ -54,6 +54,29 @@ function heartsSuitFullName(suitChar) {
   return HEARTS_SUIT_NAMES[suitChar] || '';
 }
 
+// A short two-note chime, purely a sighted-player convenience cue layered on
+// top of the existing "Hearts are now broken" srSpeak announcements (never a
+// replacement for them - see the callers below). playTone() is defined in
+// lumo-client.js but shared across game clients via the global scope (see
+// this file's header comment), the same way playErrorTone() is already
+// reused here.
+function playHeartsBrokenChime() {
+  playTone(660, 140);
+  window.setTimeout(function () { playTone(880, 220); }, 130);
+}
+
+// Centralizes every place appState.heartsHeartsBroken gets set from a server
+// payload, so the chime fires exactly once per hand, right on the
+// false-to-true transition, regardless of which of the several events
+// (heartsTurnState, tableState-driven renderHeartsPanel) happens to be the
+// one that first carries the news for a given seat.
+function heartsApplyHeartsBroken(newValue) {
+  if (newValue && !appState.heartsHeartsBroken) {
+    playHeartsBrokenChime();
+  }
+  appState.heartsHeartsBroken = !!newValue;
+}
+
 // --- Status region -------------------------------------------------------
 
 function renderHeartsStatus() {
@@ -122,8 +145,24 @@ function getHeartsOwnPlayer() {
 // --- Trick area ------------------------------------------------------------
 
 function renderHeartsTrick() {
+  const area = document.getElementById('hearts-trick-area');
   const list = document.getElementById('hearts-trick-list');
   if (!list) {
+    return;
+  }
+
+  // The trick area only makes sense once a hand is actually underway (it has
+  // nothing to show during passing, or before the first hand is dealt) - see
+  // the module header/CLAUDE.md accessibility notes: this is purely a sighted
+  // convenience panel, so it never affects the ARIA-live announcements below
+  // or the blind-player experience (announceHeartsTrick/heartsTrickResult
+  // already narrate the same information regardless of this panel's
+  // visibility).
+  const showArea = appState.heartsPhase === 'playing' || appState.heartsPhase === 'trick_complete';
+  if (area) {
+    area.classList.toggle('hidden', !showArea);
+  }
+  if (!showArea) {
     return;
   }
 
@@ -470,7 +509,7 @@ function renderHeartsPanel() {
     appState.heartsDirection = hearts.direction;
     appState.heartsPhase = hearts.phase;
     appState.heartsTrickNumber = hearts.trickNumber;
-    appState.heartsHeartsBroken = hearts.heartsBroken;
+    heartsApplyHeartsBroken(hearts.heartsBroken);
     appState.heartsTrick = hearts.trick || [];
     appState.heartsLastTrick = hearts.lastTrick || null;
     appState.heartsTurnPlayerId = hearts.turnPlayerId;
@@ -661,7 +700,7 @@ socket.on('heartsTurnState', function (payload) {
 
   appState.heartsPhase = 'playing';
   appState.heartsTrickNumber = payload.trickNumber;
-  appState.heartsHeartsBroken = payload.heartsBroken;
+  heartsApplyHeartsBroken(payload.heartsBroken);
   appState.heartsTrick = payload.trick || [];
   appState.heartsTurnPlayerId = payload.turnPlayerId;
   appState.heartsTurnPlayerName = payload.turnPlayerName;

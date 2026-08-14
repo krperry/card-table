@@ -612,8 +612,8 @@ canvas {
 }
 
 .hearts-hand button {
-  width: 76px;
-  min-height: 108px;
+  width: 120px;
+  min-height: 168px;
 }
 
 .hearts-hand button img {
@@ -658,11 +658,11 @@ canvas {
   gap: 4px;
   font-size: 13px;
   color: #234544;
-  width: 90px;
+  width: 130px;
 }
 
 .hearts-trick-list img {
-  width: 60px;
+  width: 110px;
   height: auto;
 }
 

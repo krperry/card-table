@@ -138,6 +138,7 @@ const el = {
   colorPickerSelection: document.getElementById('color-picker-selection'),
   colorPickerConfirmBtn: document.getElementById('color-picker-confirm-btn'),
   colorPickerCancelBtn: document.getElementById('color-picker-cancel-btn'),
+  backToGamePickerBtn: document.getElementById('back-to-game-picker-btn'),
   openRulesBtn: document.getElementById('open-rules-btn'),
   rulesOverlay: document.getElementById('rules-overlay'),
   rulesTitle: document.getElementById('rules-title'),
@@ -367,6 +368,9 @@ function bindUi() {
   bindPress(el.kickPlayerBtn, openKickPlayerOverlay);
   bindPress(el.kickPlayerCancelBtn, closeKickPlayerOverlay);
   bindPress(el.placeholderBackBtn, function () {
+    showGamePicker();
+  });
+  bindPress(el.backToGamePickerBtn, function () {
     showGamePicker();
   });
   bindPress(el.placeholderUnoBtn, function () {
@@ -792,6 +796,159 @@ function isHeartsTable() {
   return !!(appState.currentTable && appState.currentTable.gameType === 'hearts');
 }
 
+// True whenever the player is currently looking at anything Hearts-flavored -
+// either seated at a Hearts table, or still on the shared create-table/lobby
+// screen with Hearts selected as the game to create/join (see render()'s own
+// `isHearts` computation, which uses the same two-part check).
+function isHeartsContext() {
+  return isHeartsTable() || appState.selectedGameType === 'hearts';
+}
+
+const RULES_BY_GAME = {
+  hearts: { file: 'hearts-rules.md', title: 'Hearts Rules', openedAnnouncement: 'Hearts rules opened' },
+  uno: { file: 'lumo-rules.md', title: 'Lumo Rules', openedAnnouncement: 'Lumo rules opened' }
+};
+
+const rulesHtmlCache = {};
+
+function getActiveRulesDefinition() {
+  return RULES_BY_GAME[isHeartsContext() ? 'hearts' : 'uno'];
+}
+
+function escapeHtml(text) {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+function inlineMarkdownFormat(text) {
+  return escapeHtml(text).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+}
+
+// Small dependency-free renderer for the fixed structure of lumo-rules.md /
+// hearts-rules.md (#/##/### headings, "- " bullet lists, **bold**, plain
+// paragraphs). Each document's own top-level "# ... Rules" heading is dropped
+// since the dialog already provides that heading for focus purposes.
+function renderRulesMarkdown(markdown) {
+  const lines = markdown.replace(/\r\n/g, '\n').split('\n');
+  const htmlParts = [];
+  let listOpen = false;
+  let paragraphBuffer = [];
+  let skippedTopHeading = false;
+
+  function flushParagraph() {
+    if (paragraphBuffer.length) {
+      htmlParts.push('<p>' + paragraphBuffer.join(' ') + '</p>');
+      paragraphBuffer = [];
+    }
+  }
+
+  function closeListIfOpen() {
+    if (listOpen) {
+      htmlParts.push('</ul>');
+      listOpen = false;
+    }
+  }
+
+  lines.forEach(function (rawLine) {
+    const line = rawLine.trim();
+
+    if (!line) {
+      flushParagraph();
+      closeListIfOpen();
+      return;
+    }
+
+    const headingMatch = line.match(/^(#{1,3})\s+(.*)$/);
+    if (headingMatch) {
+      flushParagraph();
+      closeListIfOpen();
+
+      if (!skippedTopHeading && headingMatch[1].length === 1) {
+        skippedTopHeading = true;
+        return;
+      }
+
+      const level = Math.min(6, headingMatch[1].length + 2);
+      htmlParts.push('<h' + level + '>' + inlineMarkdownFormat(headingMatch[2]) + '</h' + level + '>');
+      return;
+    }
+
+    const bulletMatch = line.match(/^[-*]\s+(.*)$/);
+    if (bulletMatch) {
+      flushParagraph();
+      if (!listOpen) {
+        htmlParts.push('<ul>');
+        listOpen = true;
+      }
+      htmlParts.push('<li>' + inlineMarkdownFormat(bulletMatch[1]) + '</li>');
+      return;
+    }
+
+    if (/^-{3,}$/.test(line)) {
+      return;
+    }
+
+    closeListIfOpen();
+    paragraphBuffer.push(inlineMarkdownFormat(line));
+  });
+
+  flushParagraph();
+  closeListIfOpen();
+  return htmlParts.join('\n');
+}
+
+function openRulesOverlay() {
+  const rulesDef = getActiveRulesDefinition();
+
+  appState.rulesOpen = true;
+  appState.rulesReturnFocusEl = document.activeElement && typeof document.activeElement.focus === 'function'
+    ? document.activeElement
+    : null;
+
+  el.rulesTitle.textContent = rulesDef.title;
+  el.rulesOverlay.classList.remove('hidden');
+  el.rulesTitle.focus();
+  srSpeak(rulesDef.openedAnnouncement, 'assertive', { canInterruptLock: true });
+
+  if (rulesHtmlCache[rulesDef.file]) {
+    el.rulesContent.innerHTML = rulesHtmlCache[rulesDef.file];
+    return;
+  }
+
+  el.rulesContent.innerHTML = '<p>Loading rules...</p>';
+
+  fetch(rulesDef.file)
+    .then(function (response) {
+      if (!response.ok) {
+        throw new Error('Unable to load rules');
+      }
+      return response.text();
+    })
+    .then(function (markdown) {
+      rulesHtmlCache[rulesDef.file] = renderRulesMarkdown(markdown);
+      el.rulesContent.innerHTML = rulesHtmlCache[rulesDef.file];
+    })
+    .catch(function () {
+      el.rulesContent.innerHTML = '<p>Unable to load the ' + rulesDef.title + ' right now. Please try again later.</p>';
+    });
+}
+
+function closeRulesOverlay() {
+  appState.rulesOpen = false;
+  el.rulesOverlay.classList.add('hidden');
+
+  const target = appState.rulesReturnFocusEl;
+  appState.rulesReturnFocusEl = null;
+
+  if (target && typeof target.focus === 'function' && document.contains(target)) {
+    target.focus();
+  } else if (el.openRulesBtn) {
+    el.openRulesBtn.focus();
+  }
+}
+
 function openHelpOverlay() {
   appState.helpOpen = true;
   const heartsHelp = document.getElementById('help-content-hearts');
@@ -918,12 +1075,15 @@ function render() {
       : 'Pick a card game to continue. Lumo and Hearts are available now; the others are accessible previews for later work.';
   }
 
-  const isHearts = appState.selectedGameType === 'hearts' || (appState.currentTable && appState.currentTable.gameType === 'hearts');
+  const isHearts = isHeartsContext();
   if (el.lumoTableSettings) {
     el.lumoTableSettings.classList.toggle('hidden', isHearts);
   }
   if (el.heartsTableSettings) {
     el.heartsTableSettings.classList.toggle('hidden', !isHearts);
+  }
+  if (el.openRulesBtn) {
+    el.openRulesBtn.textContent = 'Read ' + (isHearts ? 'Hearts' : 'Lumo') + ' Rules';
   }
 
   if (appState.currentTable) {
@@ -1311,6 +1471,16 @@ socket.on('tableState', function (payload) {
   appState.currentTable = payload.table;
   appState.gameStatus = payload.table.status;
   appState.isHost = !!payload.youAreHost;
+  // Keep selectedGameType/selectedGameName in sync with whichever table this
+  // socket is actually seated at, not just whichever game was last chosen via
+  // selectGame(). Without this, resuming a session (page reload / remember-me
+  // resumeLogin) straight into a seated table never runs selectGame() at all,
+  // so selectedGameType stays at its initial null - and then leaving that
+  // table would fall back to the Lumo lobby/rules instead of this table's own
+  // game (see leaveTable's tableState-with-no-table branch below, and
+  // render()'s isHearts computation, both of which trust this field).
+  appState.selectedGameType = payload.table.gameType;
+  appState.selectedGameName = payload.table.gameName || appState.selectedGameName;
   const enteredInGame = !wasInGame && appState.gameStatus === 'in_game';
 
   if (payload.table.status !== 'in_game') {
