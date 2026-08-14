@@ -11,7 +11,7 @@ html, body {
 }
 
 .app-shell {
-  max-width: 1420px;
+  max-width: 1700px;
   margin: 0 auto;
   padding: 20px;
 }
@@ -309,7 +309,7 @@ canvas {
   display: block;
   background-color: #10ac84;
   width: 100%;
-  max-width: 1000px;
+  max-width: 1300px;
   min-width: 0;
   height: auto;
   touch-action: none;
@@ -324,6 +324,50 @@ canvas {
   .play-history-panel {
     width: 100%;
     flex: 1 1 auto;
+  }
+}
+
+/* Full-screen / maximized table view. Toggled by #fullscreen-toggle-btn in
+   main.js: it always adds the .is-maximized class (works everywhere,
+   including browsers like iOS Safari that don't support the Fullscreen API),
+   and additionally requests real Fullscreen API fullscreen where available
+   (:fullscreen), which hides browser chrome too. Both selectors get the same
+   viewport-filling treatment so Lumo's canvas and Hearts' hand have as much
+   room as the device can offer. */
+#table-view.is-maximized,
+#table-view:fullscreen,
+#table-view:-webkit-full-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  margin: 0;
+  max-width: none;
+  width: 100vw;
+  height: 100vh;
+  overflow-y: auto;
+  border-radius: 0;
+  padding: 16px 20px 24px;
+  background: #f6faf7;
+}
+
+#table-view.is-maximized canvas,
+#table-view:fullscreen canvas,
+#table-view:-webkit-full-screen canvas {
+  max-width: 1800px;
+}
+
+#table-view.is-maximized .game-board-layout,
+#table-view:fullscreen .game-board-layout,
+#table-view:-webkit-full-screen .game-board-layout {
+  max-width: 1900px;
+  margin: 10px auto 0;
+}
+
+@media (max-width: 900px) {
+  #table-view.is-maximized,
+  #table-view:fullscreen,
+  #table-view:-webkit-full-screen {
+    padding: 10px;
   }
 }
 
@@ -612,8 +656,9 @@ canvas {
 }
 
 .hearts-hand button {
-  width: 120px;
-  min-height: 168px;
+  flex: 1 1 0;
+  min-width: 46px;
+  max-width: 120px;
 }
 
 .hearts-hand button img {

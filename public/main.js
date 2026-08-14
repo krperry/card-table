@@ -112,6 +112,7 @@ const el = {
   playerSummary: document.getElementById('player-summary'),
   startGameBtn: document.getElementById('start-game-btn'),
   leaveTableBtn: document.getElementById('leave-table-btn'),
+  fullscreenToggleBtn: document.getElementById('fullscreen-toggle-btn'),
   kickPlayerBtn: document.getElementById('kick-player-btn'),
   kickPlayerOverlay: document.getElementById('kick-player-overlay'),
   kickPlayerTitle: document.getElementById('kick-player-title'),
@@ -192,6 +193,96 @@ function setRoundResult(message) {
 }
 
 
+
+// Table full-screen / maximize toggle. Applies to whichever game panel is
+// currently visible inside #table-view (Lumo or Hearts) so both games share
+// one implementation - see CLAUDE.md: generic table chrome belongs here, not
+// in a per-game client file. Always toggles the .is-maximized CSS class
+// (works on every browser, including iOS Safari which has no Fullscreen
+// API), and additionally requests real Fullscreen where supported.
+function requestElementFullscreen(element) {
+  const request = element.requestFullscreen || element.webkitRequestFullscreen;
+  if (typeof request === 'function') {
+    try {
+      const result = request.call(element);
+      if (result && typeof result.catch === 'function') {
+        result.catch(function () {});
+      }
+    } catch (error) {
+      // Fullscreen request denied/unsupported - .is-maximized still applies.
+    }
+  }
+}
+
+function exitDocumentFullscreen() {
+  const exit = document.exitFullscreen || document.webkitExitFullscreen;
+  if (typeof exit === 'function' && currentFullscreenElement()) {
+    try {
+      const result = exit.call(document);
+      if (result && typeof result.catch === 'function') {
+        result.catch(function () {});
+      }
+    } catch (error) {
+      // Nothing to exit.
+    }
+  }
+}
+
+function currentFullscreenElement() {
+  return document.fullscreenElement || document.webkitFullscreenElement || null;
+}
+
+function isTableMaximized() {
+  return !!(el.tableView && el.tableView.classList.contains('is-maximized'));
+}
+
+function updateFullscreenButtonLabel() {
+  if (!el.fullscreenToggleBtn) {
+    return;
+  }
+
+  const active = isTableMaximized();
+  el.fullscreenToggleBtn.textContent = active ? 'Exit Full Screen' : 'Full Screen';
+  el.fullscreenToggleBtn.setAttribute('aria-pressed', active ? 'true' : 'false');
+}
+
+function exitTableFullscreen() {
+  if (!el.tableView) {
+    return;
+  }
+
+  el.tableView.classList.remove('is-maximized');
+  exitDocumentFullscreen();
+  updateFullscreenButtonLabel();
+}
+
+function toggleTableFullscreen() {
+  if (!el.tableView) {
+    return;
+  }
+
+  if (isTableMaximized()) {
+    exitTableFullscreen();
+    srSpeak('Exited full screen', 'polite');
+    return;
+  }
+
+  el.tableView.classList.add('is-maximized');
+  requestElementFullscreen(el.tableView);
+  updateFullscreenButtonLabel();
+  srSpeak('Entered full screen', 'polite');
+}
+
+['fullscreenchange', 'webkitfullscreenchange'].forEach(function (eventName) {
+  document.addEventListener(eventName, function () {
+    // Syncs the .is-maximized class/button label when the browser exits
+    // Fullscreen on its own (e.g. the user pressed Escape).
+    if (!currentFullscreenElement() && el.tableView && el.tableView.classList.contains('is-maximized')) {
+      el.tableView.classList.remove('is-maximized');
+      updateFullscreenButtonLabel();
+    }
+  });
+});
 
 function getGameDefinition(gameType) {
   return GAME_CATALOG[gameType] || null;
@@ -365,6 +456,7 @@ function bindUi() {
   bindPress(el.joinTableBtn, joinSelectedTable);
   bindPress(el.startGameBtn, startGame);
   bindPress(el.leaveTableBtn, leaveTable);
+  bindPress(el.fullscreenToggleBtn, toggleTableFullscreen);
   bindPress(el.kickPlayerBtn, openKickPlayerOverlay);
   bindPress(el.kickPlayerCancelBtn, closeKickPlayerOverlay);
   bindPress(el.placeholderBackBtn, function () {
@@ -1064,6 +1156,9 @@ function render() {
   el.accountBar.classList.toggle('hidden', !appState.loggedIn);
   el.lobbyView.classList.toggle('hidden', !appState.loggedIn || appState.currentScreen !== 'lobby' || !!appState.currentTable);
   el.tableView.classList.toggle('hidden', !appState.currentTable);
+  if (!appState.currentTable && isTableMaximized()) {
+    exitTableFullscreen();
+  }
 
   if (appState.loggedIn) {
     el.accountLabel.textContent = 'Logged in as ' + appState.playerName + ' (' + appState.accountEmail + ')';
