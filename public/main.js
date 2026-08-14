@@ -113,6 +113,7 @@ const el = {
   startGameBtn: document.getElementById('start-game-btn'),
   leaveTableBtn: document.getElementById('leave-table-btn'),
   fullscreenToggleBtn: document.getElementById('fullscreen-toggle-btn'),
+  fullscreenExitBtn: document.getElementById('fullscreen-exit-btn'),
   kickPlayerBtn: document.getElementById('kick-player-btn'),
   kickPlayerOverlay: document.getElementById('kick-player-overlay'),
   kickPlayerTitle: document.getElementById('kick-player-title'),
@@ -457,6 +458,10 @@ function bindUi() {
   bindPress(el.startGameBtn, startGame);
   bindPress(el.leaveTableBtn, leaveTable);
   bindPress(el.fullscreenToggleBtn, toggleTableFullscreen);
+  bindPress(el.fullscreenExitBtn, function () {
+    exitTableFullscreen();
+    srSpeak('Exited full screen', 'polite');
+  });
   bindPress(el.kickPlayerBtn, openKickPlayerOverlay);
   bindPress(el.kickPlayerCancelBtn, closeKickPlayerOverlay);
   bindPress(el.placeholderBackBtn, function () {

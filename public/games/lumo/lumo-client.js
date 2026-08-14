@@ -419,8 +419,16 @@ function onMouseClick(event) {
     ? event.changedTouches[0]
     : event;
   const rect = canvas.getBoundingClientRect();
-  const x = pointer.clientX - rect.left;
-  const y = pointer.clientY - rect.top;
+  // The canvas's drawing-buffer resolution (canvas.width/height, fixed at
+  // 1000x600) is independent of its displayed CSS size, which now varies a
+  // lot more (up to 1300px normally, 1800px full screen - see style.css).
+  // Scale pointer coordinates from displayed/CSS pixels into drawing-buffer
+  // pixels so hit-testing against canvas.width/height-based math below stays
+  // correct at every display size, not just when they happen to match.
+  const scaleX = rect.width ? canvas.width / rect.width : 1;
+  const scaleY = rect.height ? canvas.height / rect.height : 1;
+  const x = (pointer.clientX - rect.left) * scaleX;
+  const y = (pointer.clientY - rect.top) * scaleY;
 
   const hand = appState.hand;
   const handTop = getHandTopY();
