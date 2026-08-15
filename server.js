@@ -5,11 +5,23 @@ const path = require('path');
 const crypto = require('crypto');
 const app = express();
 const http = require('http').Server(app);
+// Restricts which web pages are allowed to open a live connection to this
+// server. Set ORIGIN_ALLOWLIST to a comma-separated list of the site(s)
+// players actually load the page from (e.g. "https://cardtable.example.com"
+// or "http://203.0.113.5:4123") before deploying anywhere public - until
+// then this keeps today's behavior of allowing any origin, since the
+// deployment address isn't known yet. Socket.IO 2.x's `origins` option
+// accepts "protocol://hostname:port" entries (see its docs for the exact
+// matching rules).
+const ORIGIN_ALLOWLIST = process.env.ORIGIN_ALLOWLIST
+  ? process.env.ORIGIN_ALLOWLIST.split(',').map(function (origin) { return origin.trim(); }).filter(Boolean)
+  : '*:*';
 const io = require('socket.io')(http, {
   // Mobile Safari can pause background tabs, delaying heartbeat responses.
   // Allow a longer window so brief focus loss does not eject active players.
   pingInterval: 25000,
-  pingTimeout: 300000
+  pingTimeout: 300000,
+  origins: ORIGIN_ALLOWLIST
 });
 
 const port = process.env.PORT || 4123;
