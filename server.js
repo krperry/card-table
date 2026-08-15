@@ -752,6 +752,12 @@ function onConnection(socket) {
         });
       }
 
+      if (payload.scores && typeof payload.scores === 'object') {
+        Object.keys(payload.scores).forEach(function (playerName) {
+          table.scores[playerName] = payload.scores[playerName];
+        });
+      }
+
       if (gameModule.applyTestState) {
         gameModule.applyTestState(table, payload);
       }

@@ -145,6 +145,23 @@
           </div>
           <p class="hint">Spades always seats exactly four players in fixed partnerships: seats 1 &amp; 3 are partners, seats 2 &amp; 4 are partners. If fewer than four have joined, starting the table fills the rest with computer players.</p>
         </div>
+        <div id="cribbage-table-settings" class="hidden">
+          <div class="row">
+            <label class="inline-label" for="new-table-cribbage-target-score">Winning score
+              <select id="new-table-cribbage-target-score">
+                <option value="121" selected>121 (standard game)</option>
+                <option value="61">61 (short game)</option>
+              </select>
+            </label>
+          </div>
+          <div class="checkbox-row">
+            <label class="inline-label" for="new-table-cribbage-muggins">
+              <input id="new-table-cribbage-muggins" type="checkbox">
+              Muggins (claim your opponent's missed points)
+            </label>
+          </div>
+          <p class="hint">Cribbage is always a two-player game. If only one player has joined, starting the table fills the second seat with a computer player.</p>
+        </div>
         <div class="row">
           <button id="create-table-btn" type="button">Create Table</button>
         </div>
@@ -260,6 +277,56 @@
           </p>
           <p class="hint">Mouse, touch, and keyboard are all supported. Press question mark for keyboard commands.</p>
         </div>
+
+        <div id="cribbage-panel" class="hidden" tabindex="-1">
+          <div id="cribbage-status" class="cribbage-status" aria-label="Cribbage game status">
+            <p id="cribbage-status-hand"></p>
+            <p id="cribbage-status-dealer"></p>
+            <p id="cribbage-status-turn"></p>
+            <p id="cribbage-status-count"></p>
+            <p id="cribbage-status-starter"></p>
+            <p id="cribbage-status-score"></p>
+          </div>
+
+          <svg id="cribbage-board" class="cribbage-board" viewBox="0 0 600 140" aria-hidden="true" focusable="false"></svg>
+
+          <div id="cribbage-discard-area" class="cribbage-section hidden" aria-labelledby="cribbage-discard-title">
+            <h3 id="cribbage-discard-title">Discard to the crib</h3>
+            <p id="cribbage-discard-instructions" class="hint">Select two cards, then press Enter while a card is focused (or use the Confirm Discard button) to send them to the crib.</p>
+            <div id="cribbage-discard-hand" class="cribbage-hand" role="group" aria-label="Your hand - select two cards to discard"></div>
+            <button id="cribbage-discard-btn" type="button" disabled>Confirm Discard</button>
+          </div>
+
+          <div id="cribbage-peg-area" class="cribbage-section hidden" aria-labelledby="cribbage-peg-title">
+            <h3 id="cribbage-peg-title">Pegging</h3>
+            <ul id="cribbage-peg-segment-list" class="cribbage-peg-segment-list" aria-label="Cards played so far this count"></ul>
+            <div id="cribbage-peg-hand" class="cribbage-hand" role="group" aria-label="Your hand"></div>
+            <button id="cribbage-go-btn" type="button" class="hidden">Go</button>
+          </div>
+
+          <div id="cribbage-show-area" class="cribbage-section hidden" aria-labelledby="cribbage-show-title">
+            <h3 id="cribbage-show-title">Counting the hand</h3>
+            <p id="cribbage-show-owner"></p>
+            <ul id="cribbage-show-cards" class="cribbage-card-list" aria-label="Cards being counted"></ul>
+            <p id="cribbage-show-breakdown"></p>
+            <button id="cribbage-show-continue-btn" type="button">Continue</button>
+          </div>
+
+          <div id="cribbage-muggins-area" class="cribbage-section hidden" aria-labelledby="cribbage-muggins-title">
+            <h3 id="cribbage-muggins-title">Count your hand</h3>
+            <ul id="cribbage-muggins-cards" class="cribbage-card-list" aria-label="Cards to count"></ul>
+            <label class="inline-label" for="cribbage-muggins-count-input">Your count
+              <input id="cribbage-muggins-count-input" type="number" min="0" step="1" value="0">
+            </label>
+            <button id="cribbage-muggins-submit-btn" type="button">Submit Count</button>
+            <button id="cribbage-muggins-claim-btn" type="button">Claim Missed Points</button>
+          </div>
+
+          <p id="cribbage-help" class="visually-hidden">
+            Use the arrow keys to move between cards. Press Space or Enter to select a card for discarding, or to play the focused card during pegging. Press question mark to open the keyboard commands dialog.
+          </p>
+          <p class="hint">Mouse, touch, and keyboard are all supported. Press question mark for keyboard commands.</p>
+        </div>
       </section>
     </main>
 
@@ -316,6 +383,22 @@
           <li>R: announce your partner's name</li>
           <li>S: announce your team's score</li>
           <li>Shift+S: announce both teams' scores</li>
+          <li>?: open this help</li>
+          <li>Escape: close this help</li>
+        </ul>
+        <ul id="help-content-cribbage" class="hidden">
+          <li>Left/Right Arrow (or Up/Down): move between cards in your hand</li>
+          <li>Home/End: jump to the first/last card</li>
+          <li>Enter or Space, while discarding: select or unselect the focused card (choose exactly two, then use the Confirm Discard button)</li>
+          <li>Enter or Space, during pegging: play the focused card on your turn</li>
+          <li>H: announce your full hand</li>
+          <li>T: announce hand number, dealer, phase, and whose turn it is</li>
+          <li>C: announce the current pegging count</li>
+          <li>P: announce the cards played so far this count</li>
+          <li>U: announce the starter card</li>
+          <li>K: announce the crib contents, once revealed</li>
+          <li>S: announce your score</li>
+          <li>Shift+S: announce both players' scores</li>
           <li>?: open this help</li>
           <li>Escape: close this help</li>
         </ul>
@@ -381,6 +464,7 @@
     <script src="games/lumo/lumo-client.js"></script>
     <script src="games/hearts/hearts-client.js"></script>
     <script src="games/spades/spades-client.js"></script>
+    <script src="games/cribbage/cribbage-client.js"></script>
     <!-- Game client modules share main.js's scope (see lumo-client.js's header
          comment); init() is called last, once every game module has finished
          registering its socket handlers. -->

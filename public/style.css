@@ -375,6 +375,12 @@ canvas {
   margin: 10px auto 0;
 }
 
+#table-view.is-maximized #cribbage-panel .cribbage-board,
+#table-view:fullscreen #cribbage-panel .cribbage-board,
+#table-view:-webkit-full-screen #cribbage-panel .cribbage-board {
+  max-width: 1100px;
+}
+
 @media (max-width: 900px) {
   #table-view.is-maximized,
   #table-view:fullscreen,
@@ -907,4 +913,209 @@ canvas {
 .spades-trick-winner {
   width: auto !important;
   font-weight: 700;
+}
+
+/* Cribbage panel - mirrors the .hearts-*/.spades-* rule sets above (same
+   fully game-namespaced, self-contained structure), plus the graphical
+   peg-scoring board (inline SVG, aria-hidden - see cribbage-client.js's
+   header comment) that neither other game has an equivalent of. */
+
+#cribbage-panel {
+  margin-top: 10px;
+  padding: 10px;
+  border-radius: 10px;
+  background: #10ac84;
+}
+
+#cribbage-panel:focus {
+  outline: 2px solid #f8fff6;
+  outline-offset: 2px;
+}
+
+.cribbage-status {
+  margin: 0 0 12px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: #ecf6f4;
+  border: 1px solid #b7d2cc;
+}
+
+.cribbage-status p {
+  margin: 4px 0;
+  color: #1d4342;
+  font-weight: 600;
+}
+
+.cribbage-status p:empty {
+  display: none;
+}
+
+.cribbage-section {
+  margin-bottom: 14px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: #ecf6f4;
+  border: 1px solid #b7d2cc;
+}
+
+.cribbage-section h3 {
+  margin: 0 0 8px;
+  color: #123b39;
+}
+
+.cribbage-hand {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.cribbage-hand button,
+.cribbage-card-list img,
+.cribbage-peg-segment-list img {
+  background: #fff;
+  border: 2px solid #a7bdb7;
+  border-radius: 8px;
+  padding: 2px;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.cribbage-hand button {
+  flex: 1 1 0;
+  min-width: 46px;
+  max-width: 120px;
+}
+
+.cribbage-hand button img {
+  width: 100%;
+  height: auto;
+  display: block;
+  pointer-events: none;
+}
+
+.cribbage-hand button:focus-visible {
+  outline: 3px solid #0d7c67;
+  outline-offset: 1px;
+}
+
+.cribbage-hand button.selected {
+  border-color: #0d7c67;
+  box-shadow: 0 0 0 3px rgba(13, 124, 103, 0.3);
+}
+
+.cribbage-hand button.illegal,
+.cribbage-hand button[aria-disabled="true"] {
+  opacity: 0.4;
+}
+
+.cribbage-card-list,
+.cribbage-peg-segment-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.cribbage-card-list li,
+.cribbage-peg-segment-list li {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  color: #234544;
+  width: 130px;
+}
+
+.cribbage-card-list img,
+.cribbage-peg-segment-list img {
+  width: 110px;
+  height: auto;
+  cursor: default;
+}
+
+.cribbage-show-starter {
+  font-weight: 700;
+}
+
+#cribbage-go-btn,
+#cribbage-discard-btn,
+#cribbage-show-continue-btn,
+#cribbage-muggins-submit-btn,
+#cribbage-muggins-claim-btn {
+  margin-top: 10px;
+}
+
+/* Peg-scoring board: two lanes of holes (grouped every 5 in the traditional
+   physical-board style) with a leapfrogging peg pair per lane. Decorative
+   only (aria-hidden="true" in the markup) - score is always separately
+   available as text via .cribbage-status and srSpeak() announcements. */
+.cribbage-board {
+  display: block;
+  width: 100%;
+  max-width: 640px;
+  height: auto;
+  margin: 0 0 12px;
+  padding: 6px 0;
+  border-radius: 8px;
+  background: #0b7a5c;
+}
+
+.cribbage-lane-line {
+  stroke: #d9ecd9;
+  stroke-width: 1;
+  opacity: 0.6;
+}
+
+.cribbage-hole {
+  fill: #d9ecd9;
+  opacity: 0.7;
+}
+
+.cribbage-hole.tick {
+  fill: #f2fbf2;
+  opacity: 0.95;
+}
+
+.cribbage-board-finish-label {
+  fill: #f8fff6;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.cribbage-peg-gap {
+  stroke-width: 2;
+  opacity: 0.5;
+}
+
+.cribbage-peg-gap[data-player-index="0"] {
+  stroke: #f2c94c;
+}
+
+.cribbage-peg-gap[data-player-index="1"] {
+  stroke: #56ccf2;
+}
+
+.cribbage-peg-back[data-player-index="0"] {
+  fill: #b8963a;
+  opacity: 0.6;
+}
+
+.cribbage-peg-front[data-player-index="0"] {
+  fill: #f2c94c;
+  stroke: #7a5c14;
+  stroke-width: 1;
+}
+
+.cribbage-peg-back[data-player-index="1"] {
+  fill: #3a92b8;
+  opacity: 0.6;
+}
+
+.cribbage-peg-front[data-player-index="1"] {
+  fill: #56ccf2;
+  stroke: #14567a;
+  stroke-width: 1;
 }

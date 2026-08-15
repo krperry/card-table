@@ -16,7 +16,7 @@ const GAME_CATALOG = {
   uno: { type: 'uno', name: 'Lumo', playable: true, description: 'Join a live Lumo table.' },
   hearts: { type: 'hearts', name: 'Hearts', playable: true, description: 'Join a live Hearts table.' },
   spades: { type: 'spades', name: 'Spades', playable: true, description: 'Join a live Spades table.' },
-  cribbage: { type: 'cribbage', name: 'Cribbage', playable: false, description: 'Cribbage is not implemented yet.' }
+  cribbage: { type: 'cribbage', name: 'Cribbage', playable: true, description: 'Join a live Cribbage table.' }
 };
 
 
@@ -131,6 +131,10 @@ const el = {
   spadesTableSettings: document.getElementById('spades-table-settings'),
   newTableTargetScore: document.getElementById('new-table-target-score'),
   selectCribbageBtn: document.getElementById('select-cribbage-btn'),
+  cribbagePanel: document.getElementById('cribbage-panel'),
+  cribbageTableSettings: document.getElementById('cribbage-table-settings'),
+  newTableCribbageTargetScore: document.getElementById('new-table-cribbage-target-score'),
+  newTableCribbageMuggins: document.getElementById('new-table-cribbage-muggins'),
   helpOverlay: document.getElementById('help-overlay'),
   closeHelpBtn: document.getElementById('close-help-btn'),
   announcementOverlay: document.getElementById('announcement-overlay'),
@@ -760,6 +764,7 @@ function createTable() {
   const computerPlayers = parseInt(el.newTableComputerPlayers && el.newTableComputerPlayers.value, 10);
   const pointsToEndGame = parseInt(el.newTablePointsToEndGame && el.newTablePointsToEndGame.value, 10);
   const targetScore = parseInt(el.newTableTargetScore && el.newTableTargetScore.value, 10);
+  const cribbageTargetScore = parseInt(el.newTableCribbageTargetScore && el.newTableCribbageTargetScore.value, 10);
 
   socket.emit('createTable', {
     name: tableName,
@@ -772,7 +777,9 @@ function createTable() {
     computerPlayers: Number.isFinite(computerPlayers) ? computerPlayers : undefined,
     computerSkill: el.newTableComputerSkill ? el.newTableComputerSkill.value : undefined,
     pointsToEndGame: Number.isFinite(pointsToEndGame) ? pointsToEndGame : undefined,
-    targetScore: Number.isFinite(targetScore) ? targetScore : undefined
+    targetScore: Number.isFinite(targetScore) ? targetScore : undefined,
+    cribbageTargetScore: Number.isFinite(cribbageTargetScore) ? cribbageTargetScore : undefined,
+    cribbageMuggins: !!(el.newTableCribbageMuggins && el.newTableCribbageMuggins.checked)
   });
 }
 
@@ -914,6 +921,14 @@ function isSpadesContext() {
   return isSpadesTable() || appState.selectedGameType === 'spades';
 }
 
+function isCribbageTable() {
+  return !!(appState.currentTable && appState.currentTable.gameType === 'cribbage');
+}
+
+function isCribbageContext() {
+  return isCribbageTable() || appState.selectedGameType === 'cribbage';
+}
+
 // Whichever game the player is currently looking at, table or no table -
 // either seated at a table (gameType is authoritative there) or still on the
 // shared create-table/lobby screen with a game selected. Falls back to 'uno'
@@ -928,6 +943,7 @@ function getActiveGameType() {
 const RULES_BY_GAME = {
   hearts: { file: 'hearts-rules.md', title: 'Hearts Rules', openedAnnouncement: 'Hearts rules opened' },
   spades: { file: 'spades-rules.md', title: 'Spades Rules', openedAnnouncement: 'Spades rules opened' },
+  cribbage: { file: 'cribbage-rules.md', title: 'Cribbage Rules', openedAnnouncement: 'Cribbage rules opened' },
   uno: { file: 'lumo-rules.md', title: 'Lumo Rules', openedAnnouncement: 'Lumo rules opened' }
 };
 
@@ -1076,11 +1092,13 @@ function openHelpOverlay() {
   const heartsHelp = document.getElementById('help-content-hearts');
   const lumoHelp = document.getElementById('help-content-lumo');
   const spadesHelp = document.getElementById('help-content-spades');
+  const cribbageHelp = document.getElementById('help-content-cribbage');
   const activeGameType = getActiveGameType();
-  if (heartsHelp && lumoHelp && spadesHelp) {
+  if (heartsHelp && lumoHelp && spadesHelp && cribbageHelp) {
     heartsHelp.classList.toggle('hidden', activeGameType !== 'hearts');
     spadesHelp.classList.toggle('hidden', activeGameType !== 'spades');
-    lumoHelp.classList.toggle('hidden', activeGameType === 'hearts' || activeGameType === 'spades');
+    cribbageHelp.classList.toggle('hidden', activeGameType !== 'cribbage');
+    lumoHelp.classList.toggle('hidden', activeGameType === 'hearts' || activeGameType === 'spades' || activeGameType === 'cribbage');
   }
   el.helpOverlay.classList.remove('hidden');
   el.closeHelpBtn.focus();
@@ -1093,7 +1111,9 @@ function closeHelpOverlay() {
     el.heartsPanel.focus();
   } else if (appState.currentTable && appState.gameStatus === 'in_game' && isSpadesTable() && el.spadesPanel) {
     el.spadesPanel.focus();
-  } else if (appState.currentTable && appState.gameStatus === 'in_game' && !isHeartsTable() && !isSpadesTable()) {
+  } else if (appState.currentTable && appState.gameStatus === 'in_game' && isCribbageTable() && el.cribbagePanel) {
+    el.cribbagePanel.focus();
+  } else if (appState.currentTable && appState.gameStatus === 'in_game' && !isHeartsTable() && !isSpadesTable() && !isCribbageTable()) {
     focusBoardForA11y({
       announceOnFocus: true
     });
@@ -1173,6 +1193,10 @@ function closeAnnouncementOverlay(restoreFocus) {
     socket.emit('spadesAckHandSummary');
   }
 
+  if (wasOpen && kind === 'cribbageHandSummary') {
+    socket.emit('cribbageAckHandSummary');
+  }
+
   if (restoreFocus === false) {
     return;
   }
@@ -1181,7 +1205,9 @@ function closeAnnouncementOverlay(restoreFocus) {
     el.heartsPanel.focus();
   } else if (appState.currentTable && appState.gameStatus === 'in_game' && isSpadesTable() && el.spadesPanel) {
     el.spadesPanel.focus();
-  } else if (appState.currentTable && appState.gameStatus === 'in_game' && !isHeartsTable() && !isSpadesTable()) {
+  } else if (appState.currentTable && appState.gameStatus === 'in_game' && isCribbageTable() && el.cribbagePanel) {
+    el.cribbagePanel.focus();
+  } else if (appState.currentTable && appState.gameStatus === 'in_game' && !isHeartsTable() && !isSpadesTable() && !isCribbageTable()) {
     focusBoardForA11y({
       announceOnFocus: true
     });
@@ -1208,21 +1234,25 @@ function render() {
   if (el.gamePickerSummary) {
     el.gamePickerSummary.textContent = appState.selectedGameType
       ? 'Selected game: ' + (getGameDefinition(appState.selectedGameType) || { name: 'Lumo' }).name
-      : 'Pick a card game to continue. Lumo, Hearts, and Spades are available now; Cribbage is an accessible preview for later work.';
+      : 'Pick a card game to continue. Lumo, Hearts, Spades, and Cribbage are all available now.';
   }
 
   const activeGameType = getActiveGameType();
   const isHearts = activeGameType === 'hearts';
   const isSpades = activeGameType === 'spades';
+  const isCribbage = activeGameType === 'cribbage';
   const activeRulesName = RULES_BY_GAME[activeGameType] ? RULES_BY_GAME[activeGameType].title.replace(/ Rules$/, '') : 'Lumo';
   if (el.lumoTableSettings) {
-    el.lumoTableSettings.classList.toggle('hidden', isHearts || isSpades);
+    el.lumoTableSettings.classList.toggle('hidden', isHearts || isSpades || isCribbage);
   }
   if (el.heartsTableSettings) {
     el.heartsTableSettings.classList.toggle('hidden', !isHearts);
   }
   if (el.spadesTableSettings) {
     el.spadesTableSettings.classList.toggle('hidden', !isSpades);
+  }
+  if (el.cribbageTableSettings) {
+    el.cribbageTableSettings.classList.toggle('hidden', !isCribbage);
   }
   if (el.openRulesBtn) {
     el.openRulesBtn.textContent = 'Read ' + activeRulesName + ' Rules';
@@ -1236,6 +1266,9 @@ function render() {
       if (el.spadesPanel) {
         el.spadesPanel.classList.add('hidden');
       }
+      if (el.cribbagePanel) {
+        el.cribbagePanel.classList.add('hidden');
+      }
       if (el.heartsPanel) {
         el.heartsPanel.classList.toggle('hidden', appState.gameStatus !== 'in_game');
       }
@@ -1246,8 +1279,24 @@ function render() {
       if (el.heartsPanel) {
         el.heartsPanel.classList.add('hidden');
       }
+      if (el.cribbagePanel) {
+        el.cribbagePanel.classList.add('hidden');
+      }
       if (el.spadesPanel) {
         el.spadesPanel.classList.toggle('hidden', appState.gameStatus !== 'in_game');
+      }
+    } else if (isCribbage) {
+      if (el.gamePanel) {
+        el.gamePanel.classList.add('hidden');
+      }
+      if (el.heartsPanel) {
+        el.heartsPanel.classList.add('hidden');
+      }
+      if (el.spadesPanel) {
+        el.spadesPanel.classList.add('hidden');
+      }
+      if (el.cribbagePanel) {
+        el.cribbagePanel.classList.toggle('hidden', appState.gameStatus !== 'in_game');
       }
     } else {
       if (el.heartsPanel) {
@@ -1255,6 +1304,9 @@ function render() {
       }
       if (el.spadesPanel) {
         el.spadesPanel.classList.add('hidden');
+      }
+      if (el.cribbagePanel) {
+        el.cribbagePanel.classList.add('hidden');
       }
       el.gamePanel.classList.toggle('hidden', appState.gameStatus !== 'in_game');
     }
@@ -1273,6 +1325,12 @@ function render() {
           ? ' | Hand ' + appState.currentTable.spades.handNumber
           : '';
         el.tableMatchSettings.textContent = 'Target score: ' + (matchSettings.targetScore || 500) + handText;
+      } else if (isCribbage) {
+        const handText = appState.gameStatus === 'in_game' && appState.currentTable.cribbage
+          ? ' | Hand ' + appState.currentTable.cribbage.handNumber
+          : '';
+        el.tableMatchSettings.textContent = 'Target score: ' + (matchSettings.targetScore || 121)
+          + (matchSettings.mugginsEnabled ? ' | Muggins on' : '') + handText;
       } else {
         const roundText = appState.gameStatus === 'in_game' && typeof appState.currentTable.roundNumber === 'number'
           ? ' | This is round ' + appState.currentTable.roundNumber + ' of ' + matchSettings.maxRounds
@@ -1289,10 +1347,10 @@ function render() {
       }
     }
 
-    if (isHearts || isSpades) {
-      // Hearts and Spades both always fill to exactly four seats with
-      // computer players when the host starts, so there is no minimum-player
-      // gate to enforce here.
+    if (isHearts || isSpades || isCribbage) {
+      // Hearts, Spades, and Cribbage all always fill to their fixed seat
+      // count with computer players when the host starts, so there is no
+      // minimum-player gate to enforce here.
       el.startGameBtn.disabled = !appState.isHost || appState.gameStatus === 'in_game';
     } else {
       const computerPlayerCount = (appState.currentTable.matchSettings && appState.currentTable.matchSettings.computerPlayers) || 0;
@@ -1307,7 +1365,7 @@ function render() {
       el.kickPlayerBtn.disabled = !hasOtherPlayers;
     }
     setTableStatus(appState.tableStatusMessage, appState.tableStatusTone);
-    if (!isHearts && !isSpades) {
+    if (!isHearts && !isSpades && !isCribbage) {
       setPlayDirectionIndicator();
     } else if (el.playDirection) {
       el.playDirection.textContent = '';
@@ -1328,6 +1386,9 @@ function render() {
   }
   if (typeof renderSpadesPanel === 'function') {
     renderSpadesPanel();
+  }
+  if (typeof renderCribbagePanel === 'function') {
+    renderCribbagePanel();
   }
 }
 
@@ -1373,8 +1434,12 @@ function renderPlayerSummary() {
 
   const isHearts = appState.currentTable.gameType === 'hearts';
   const isSpades = appState.currentTable.gameType === 'spades';
+  const isCribbage = appState.currentTable.gameType === 'cribbage';
   const heartsTurnPlayerId = isHearts && appState.currentTable.hearts ? appState.currentTable.hearts.turnPlayerId : null;
   const spadesTurnPlayerId = isSpades && appState.currentTable.spades ? appState.currentTable.spades.turnPlayerId : null;
+  const cribbageTurnPlayerId = isCribbage && appState.currentTable.cribbage && appState.currentTable.cribbage.peg
+    ? appState.currentTable.cribbage.peg.turnPlayerId
+    : null;
 
   appState.currentTable.players.forEach(function (player, index) {
     const li = document.createElement('li');
@@ -1382,8 +1447,8 @@ function renderPlayerSummary() {
     const unoBadge = document.createElement('span');
     const details = document.createElement('span');
     const isCurrentTurn = appState.gameStatus === 'in_game'
-      && (player.id === appState.currentTurnPlayerId || player.id === heartsTurnPlayerId || player.id === spadesTurnPlayerId);
-    const hasUno = !isHearts && !isSpades && appState.gameStatus === 'in_game' && player.cardCount === 1;
+      && (player.id === appState.currentTurnPlayerId || player.id === heartsTurnPlayerId || player.id === spadesTurnPlayerId || player.id === cribbageTurnPlayerId);
+    const hasUno = !isHearts && !isSpades && !isCribbage && appState.gameStatus === 'in_game' && player.cardCount === 1;
     const tags = [];
     const totalPoints = typeof player.score === 'number' ? player.score : 0;
 
@@ -1683,13 +1748,14 @@ socket.on('tableState', function (payload) {
     if (!appState.tableStatusMessage || appState.tableStatusTone !== 'success') {
       setTableStatus('Waiting for the host to start the next game.', 'info');
     }
-  } else if (!appState.currentTurnPlayerId && !isHeartsTable() && !isSpadesTable()) {
+  } else if (!appState.currentTurnPlayerId && !isHeartsTable() && !isSpadesTable() && !isCribbageTable()) {
     // currentTurnPlayerId/appState.turn are Lumo-only fields (set from
-    // lumo-client.js) - Hearts and Spades both track turn state separately
-    // (appState.heartsTurnPlayerId / appState.spadesTurnPlayerId) and
-    // announce it themselves (see heartsTurnState/spadesTurnState in their
-    // respective client files), so this branch must not run for those
-    // tables. Without this guard it fired on every single tableState
+    // lumo-client.js) - Hearts, Spades, and Cribbage all track turn state
+    // separately (appState.heartsTurnPlayerId / appState.spadesTurnPlayerId /
+    // appState.cribbageTurnPlayerId) and announce it themselves (see
+    // heartsTurnState/spadesTurnState/cribbagePegState in their respective
+    // client files), so this branch must not run for those tables. Without
+    // this guard it fired on every single tableState
     // broadcast during Hearts/Spades play (currentTurnPlayerId is always
     // falsy for them), overwriting the real turn status with a stale
     // "waiting for the next turn update" message even when it actually was
@@ -1708,16 +1774,17 @@ socket.on('tableState', function (payload) {
 
   if (enteredInGame) {
     clearPlayHistory();
-    if (isHeartsTable() || isSpadesTable()) {
-      // Hearts and Spades both manage their own focus once the hand/bidding
-      // UI actually renders (see heartsPassPrompt/heartsHand in
-      // hearts-client.js, and spadesBidState/spadesTurnState in
-      // spades-client.js) - focusing el.heartsPanel/el.spadesPanel here as
+    if (isHeartsTable() || isSpadesTable() || isCribbageTable()) {
+      // Hearts, Spades, and Cribbage all manage their own focus once the
+      // hand/bidding/discard UI actually renders (see heartsPassPrompt/
+      // heartsHand in hearts-client.js, spadesBidState/spadesTurnState in
+      // spades-client.js, and cribbageHand in cribbage-client.js) -
+      // focusing el.heartsPanel/el.spadesPanel/el.cribbagePanel here as
       // well would race that more specific focus call (both scheduled via
       // requestAnimationFrame) and could win, leaving focus stuck on the
       // generic panel instead of the first dealt card. focusBoardForA11y()
       // below is Lumo-specific (it focuses the canvas), so this branch
-      // intentionally does nothing for Hearts/Spades.
+      // intentionally does nothing for Hearts/Spades/Cribbage.
     } else {
       window.requestAnimationFrame(function () {
         focusBoardForA11y({
