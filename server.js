@@ -149,6 +149,39 @@ function verifyPassword(password, salt, hash) {
   return derivedHash === hash;
 }
 
+// Guards login/registerAccount/deleteAccount against automated password
+// guessing: at most AUTH_RATE_LIMIT_MAX_ATTEMPTS calls per action+IP within
+// AUTH_RATE_LIMIT_WINDOW_MS, then further attempts are rejected until the
+// window rolls over. Both are overridable so tests can use a tight window
+// instead of waiting a full minute.
+const AUTH_RATE_LIMIT_MAX_ATTEMPTS = Math.max(1, parseInt(process.env.AUTH_RATE_LIMIT_MAX_ATTEMPTS || '10', 10));
+const AUTH_RATE_LIMIT_WINDOW_MS = Math.max(1000, parseInt(process.env.AUTH_RATE_LIMIT_WINDOW_MS || '60000', 10));
+const authAttemptsByKey = new Map();
+
+function isAuthRateLimited(action, socket) {
+  const key = action + ':' + (socket.handshake && socket.handshake.address ? socket.handshake.address : socket.id);
+  const now = Date.now();
+  const record = authAttemptsByKey.get(key);
+  if (!record || now - record.windowStart >= AUTH_RATE_LIMIT_WINDOW_MS) {
+    authAttemptsByKey.set(key, { windowStart: now, count: 1 });
+    return false;
+  }
+  record.count += 1;
+  return record.count > AUTH_RATE_LIMIT_MAX_ATTEMPTS;
+}
+
+// Sweeps expired entries periodically so long-running processes don't
+// accumulate one Map entry per distinct IP forever. unref() so this timer
+// never keeps the process (or a test's server) alive on its own.
+setInterval(function () {
+  const now = Date.now();
+  authAttemptsByKey.forEach(function (record, key) {
+    if (now - record.windowStart >= AUTH_RATE_LIMIT_WINDOW_MS) {
+      authAttemptsByKey.delete(key);
+    }
+  });
+}, AUTH_RATE_LIMIT_WINDOW_MS).unref();
+
 function normalizeEmail(email) {
   return typeof email === 'string' ? email.trim().toLowerCase() : '';
 }
@@ -797,6 +830,11 @@ function onConnection(socket) {
       return;
     }
 
+    if (isAuthRateLimited('registerAccount', socket)) {
+      socket.emit('loginResult', { success: false, message: 'Too many attempts. Please wait a minute and try again.' });
+      return;
+    }
+
     const email = payload && typeof payload.email === 'string' ? payload.email.trim() : '';
     const password = payload && typeof payload.password === 'string' ? payload.password : '';
     const displayName = payload && typeof payload.displayName === 'string' ? payload.displayName.trim() : '';
@@ -867,6 +905,11 @@ function onConnection(socket) {
       return;
     }
 
+    if (isAuthRateLimited('login', socket)) {
+      socket.emit('loginResult', { success: false, message: 'Too many attempts. Please wait a minute and try again.' });
+      return;
+    }
+
     const email = payload && typeof payload.email === 'string' ? payload.email.trim() : '';
     const password = payload && typeof payload.password === 'string' ? payload.password : '';
     const rememberMe = !!(payload && payload.rememberMe);
@@ -920,6 +963,11 @@ function onConnection(socket) {
   });
 
   socket.on('deleteAccount', function (payload) {
+    if (isAuthRateLimited('deleteAccount', socket)) {
+      socket.emit('deleteAccountResult', { success: false, message: 'Too many attempts. Please wait a minute and try again.' });
+      return;
+    }
+
     if (socket.accountId) {
       const password = payload && typeof payload.password === 'string' ? payload.password : '';
       if (!password) {
