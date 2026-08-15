@@ -445,13 +445,20 @@ function reclaimSeatAfterReconnect(socket) {
     table.hostId = socket.id;
   }
 
+  // emitTableState must go out before onReconnect's game-specific resync
+  // events (haveCard, turnPlayer, etc.): those events assume the client has
+  // already processed a 'tableState' and populated its local table object,
+  // and several game clients write straight into fields on that object
+  // (e.g. Lumo's turnPlayer handler sets appState.currentTable.stackState)
+  // with no null check. Reversing this order let a reconnecting client
+  // crash on whichever resync event arrived first.
+  emitTableState(table);
+  emitLobbySnapshotAll();
+
   const reconnectModule = GAME_MODULES[table.gameType];
   if (reconnectModule && reconnectModule.onReconnect) {
     reconnectModule.onReconnect(table, player, previousSocketId);
   }
-
-  emitTableState(table);
-  emitLobbySnapshotAll();
 
   if (hasPendingGrace) {
     io.to(table.id).emit('actionNotice', player.name + ' reconnected');
