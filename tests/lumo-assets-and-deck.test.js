@@ -106,7 +106,7 @@ test('every Lumo card SVG referenced by the card model can be requested from the
   const port = 3131;
   const child = spawn(process.execPath, ['server.js'], {
     cwd: REPO_ROOT,
-    env: { ...process.env, PORT: String(port) },
+    env: { ...process.env, PORT: String(port), NODE_ENV: 'test' },
     stdio: ['ignore', 'pipe', 'pipe']
   });
 
@@ -160,7 +160,7 @@ test('the Lumo rules page is reachable and the table/lobby view exposes a Read L
   const port = 3132;
   const child = spawn(process.execPath, ['server.js'], {
     cwd: REPO_ROOT,
-    env: { ...process.env, PORT: String(port) },
+    env: { ...process.env, PORT: String(port), NODE_ENV: 'test' },
     stdio: ['ignore', 'pipe', 'pipe']
   });
 

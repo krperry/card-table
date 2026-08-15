@@ -39,7 +39,7 @@ test('registering and logging in works through socket auth', async () => {
   const displayName = `AuthTestUser${Date.now()}`;
   const child = spawn(process.execPath, ['server.js'], {
     cwd: path.join(__dirname, '..'),
-    env: { ...process.env, PORT: '3100' },
+    env: { ...process.env, PORT: '3100', NODE_ENV: 'test' },
     stdio: ['ignore', 'pipe', 'pipe']
   });
 

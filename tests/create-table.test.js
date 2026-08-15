@@ -101,7 +101,7 @@ test('creating a table works through the socket API', async () => {
   const displayName = `TableTest${Date.now()}`;
   const child = spawn(process.execPath, ['server.js'], {
     cwd: path.join(__dirname, '..'),
-    env: { ...process.env, PORT: '3101' },
+    env: { ...process.env, PORT: '3101', NODE_ENV: 'test' },
     stdio: ['ignore', 'pipe', 'pipe']
   });
 

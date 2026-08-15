@@ -82,7 +82,7 @@ test('player reconnects within grace period and keeps table seat', async () => {
 
   const child = spawn(process.execPath, ['server.js'], {
     cwd: path.join(__dirname, '..'),
-    env: { ...process.env, PORT: String(port), DISCONNECT_GRACE_MS: '800' },
+    env: { ...process.env, PORT: String(port), DISCONNECT_GRACE_MS: '800', NODE_ENV: 'test' },
     stdio: ['ignore', 'pipe', 'pipe']
   });
 

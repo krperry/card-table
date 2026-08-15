@@ -1,5 +1,6 @@
 const express = require('express');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
 const app = express();
@@ -19,7 +20,16 @@ const BOT_NAME_POOL = [
   'Ava', 'Milo', 'Nora', 'Kai', 'Luna', 'Theo', 'Zoe', 'Finn', 'Ivy', 'Owen',
   'Maya', 'Leo', 'Nina', 'Jasper', 'Ruby', 'Silas', 'Wren', 'Axel', 'Piper', 'Dash'
 ];
-const ACCOUNT_FILE_PATH = path.join(__dirname, 'data', 'accounts.json');
+// Real account data (emails, password hashes) must never land in the repo's
+// data/ directory during a test run. ACCOUNT_FILE_PATH can be overridden
+// directly, and NODE_ENV=test (set by every integration test that spawns
+// this server) falls back to a per-process file in the OS temp directory
+// instead of the real accounts.json.
+const ACCOUNT_FILE_PATH = process.env.ACCOUNT_FILE_PATH
+  ? path.resolve(process.env.ACCOUNT_FILE_PATH)
+  : process.env.NODE_ENV === 'test'
+    ? path.join(os.tmpdir(), 'card-table-test-accounts-' + process.pid + '.json')
+    : path.join(__dirname, 'data', 'accounts.json');
 const LOG_FILE_PATH = path.join(__dirname, 'logs', 'server.log');
 const DEFAULT_GAME_TYPE = 'uno';
 // GAME_DEFINITIONS/GAME_MODULES are assembled further down (see "Game module

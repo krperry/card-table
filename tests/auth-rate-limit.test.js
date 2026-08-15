@@ -40,6 +40,7 @@ test('repeated failed logins from the same connection get rate-limited', async (
     env: {
       ...process.env,
       PORT: '3191',
+      NODE_ENV: 'test',
       AUTH_RATE_LIMIT_MAX_ATTEMPTS: '2',
       AUTH_RATE_LIMIT_WINDOW_MS: '3000'
     },

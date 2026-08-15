@@ -78,7 +78,7 @@ function connectAndRegister(port, email, displayName) {
 test('starting a game changes the table state to in_game', async () => {
   const child = spawn(process.execPath, ['server.js'], {
     cwd: path.join(__dirname, '..'),
-    env: { ...process.env, PORT: '3102' },
+    env: { ...process.env, PORT: '3102', NODE_ENV: 'test' },
     stdio: ['ignore', 'pipe', 'pipe']
   });
 
