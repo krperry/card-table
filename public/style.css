@@ -233,15 +233,27 @@ button:disabled {
 }
 
 /* Spades is a fixed-partnership game - tie each team's two rows together
-   visually with a shared border color (seats 0 & 2 are Team A, seats 1 & 3
-   are Team B, see games/spades/rules.js's DEFAULT_TEAMS) so the shared
-   "Score: N" value on each row reads as a team total, not a personal one. */
+   visually with a shared border color AND a shared background tint (seats
+   0 & 2 are Team A, seats 1 & 3 are Team B, see games/spades/rules.js's
+   DEFAULT_TEAMS) so the shared "Score: N" value on each row reads as a team
+   total, not a personal one, and the two rows read as one unit at a glance -
+   not just via a thin left border, which is easy to miss for low-vision
+   users. li.spades-own-team adds a bold outline around whichever team the
+   viewer is seated on, so "which team am I on" doesn't require reading text. */
 .player-summary li.spades-team-a {
   border-left-color: #6a4fb6;
+  border-left-width: 8px;
+  background: #ece6f7;
 }
 
 .player-summary li.spades-team-b {
   border-left-color: #1a8fa0;
+  border-left-width: 8px;
+  background: #e2f3f5;
+}
+
+.player-summary li.spades-own-team {
+  box-shadow: 0 0 0 3px #dd8a00;
 }
 
 .lumo-badge {
@@ -813,6 +825,19 @@ canvas {
   display: none;
 }
 
+/* Strong, high-contrast team coloring for the "Your team" status line - a
+   quick sight-read of which team you're on, matching the same team colors
+   used in .player-summary li.spades-team-a/-b. */
+#spades-status-team.spades-team-a-text {
+  color: #6a4fb6;
+  font-weight: 800;
+}
+
+#spades-status-team.spades-team-b-text {
+  color: #1a8fa0;
+  font-weight: 800;
+}
+
 .spades-section {
   margin-bottom: 14px;
   padding: 10px 14px;
@@ -872,10 +897,12 @@ canvas {
 
 .spades-bid-grid button {
   background: #fff;
+  color: #123b39;
   border: 2px solid #a7bdb7;
   border-radius: 8px;
   padding: 8px 4px;
   min-width: 46px;
+  font-size: 18px;
   cursor: pointer;
   touch-action: manipulation;
   font-weight: 700;
@@ -1040,6 +1067,16 @@ canvas {
   font-weight: 700;
 }
 
+.cribbage-crib-owner {
+  margin: 0 0 8px;
+  font-weight: 700;
+  color: #7a5c14;
+}
+
+.cribbage-crib-owner:empty {
+  display: none;
+}
+
 #cribbage-go-btn,
 #cribbage-discard-btn,
 #cribbage-show-continue-btn,
@@ -1055,7 +1092,7 @@ canvas {
 .cribbage-board {
   display: block;
   width: 100%;
-  max-width: 640px;
+  max-width: 1300px;
   height: auto;
   margin: 0 0 12px;
   padding: 6px 0;
@@ -1065,29 +1102,31 @@ canvas {
 
 .cribbage-lane-line {
   stroke: #d9ecd9;
-  stroke-width: 1;
-  opacity: 0.6;
+  stroke-width: 1.5;
+  opacity: 0.7;
 }
 
 .cribbage-hole {
   fill: #d9ecd9;
-  opacity: 0.7;
+  stroke: #0b7a5c;
+  stroke-width: 0.5;
+  opacity: 0.85;
 }
 
 .cribbage-hole.tick {
   fill: #f2fbf2;
-  opacity: 0.95;
+  opacity: 1;
 }
 
 .cribbage-board-finish-label {
   fill: #f8fff6;
-  font-size: 11px;
+  font-size: 15px;
   font-weight: 700;
 }
 
 .cribbage-peg-gap {
-  stroke-width: 2;
-  opacity: 0.5;
+  stroke-width: 3;
+  opacity: 0.6;
 }
 
 .cribbage-peg-gap[data-player-index="0"] {
@@ -1098,24 +1137,29 @@ canvas {
   stroke: #56ccf2;
 }
 
+/* Front pegs get a thicker, brighter outline plus a drop-shadow halo so the
+   current score position is unmistakable at a glance, even at small sizes -
+   the back peg (previous score, dimmed/no halo) stays visually secondary. */
 .cribbage-peg-back[data-player-index="0"] {
   fill: #b8963a;
-  opacity: 0.6;
+  opacity: 0.65;
 }
 
 .cribbage-peg-front[data-player-index="0"] {
   fill: #f2c94c;
-  stroke: #7a5c14;
-  stroke-width: 1;
+  stroke: #241a04;
+  stroke-width: 2.5;
+  filter: drop-shadow(0 0 3px rgba(0, 0, 0, 0.6));
 }
 
 .cribbage-peg-back[data-player-index="1"] {
   fill: #3a92b8;
-  opacity: 0.6;
+  opacity: 0.65;
 }
 
 .cribbage-peg-front[data-player-index="1"] {
   fill: #56ccf2;
-  stroke: #14567a;
-  stroke-width: 1;
+  stroke: #041824;
+  stroke-width: 2.5;
+  filter: drop-shadow(0 0 3px rgba(0, 0, 0, 0.6));
 }

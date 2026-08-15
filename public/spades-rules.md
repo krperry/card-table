@@ -8,6 +8,18 @@ to take at least as many tricks as their combined bid. The game ends when a
 hand pushes either team's cumulative score to the table's configured target
 score; the team with the higher score at that point wins.
 
+### What is a "trick"?
+
+A **trick** is one full round of play: each of the four players plays one
+card, in turn, until all four have played. Whoever played the
+highest-ranking card of that round **takes the trick** (collects all four
+cards played) and leads the next one. A hand is made up of exactly 13
+tricks, one for every card in a player's starting hand - it has nothing to
+do with how many spades you hold or play. "Taking a trick" and "winning a
+round of four cards" mean the same thing throughout these rules; see
+"Playing a Trick" below for exactly how the winning card of a trick is
+determined.
+
 ## Setup
 
 - Spades is always played by exactly four players in two fixed

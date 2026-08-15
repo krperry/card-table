@@ -82,6 +82,17 @@ function cribbageGetSeatName(seatIndex) {
   return player.id === socket.id ? 'You' : player.name;
 }
 
+// The dealer always owns the crib, so the two concepts are the same seat -
+// but nothing else in the UI said so explicitly, which is what prompted this
+// helper (see the srSpeak/status calls that use it below).
+function cribbageGetCribOwnerPhrase(dealerIndex) {
+  const dealerName = cribbageGetSeatName(dealerIndex);
+  if (!dealerName) {
+    return '';
+  }
+  return dealerName === 'You' ? 'your crib' : (dealerName + '’s crib');
+}
+
 function getCribbageOwnPlayer() {
   if (!appState.currentTable || !Array.isArray(appState.currentTable.players)) {
     return null;
@@ -101,7 +112,8 @@ function renderCribbageStatus() {
   const dealerEl = document.getElementById('cribbage-status-dealer');
   if (dealerEl) {
     const dealerName = cribbageGetSeatName(appState.cribbageDealerIndex);
-    dealerEl.textContent = dealerName ? ('Dealer: ' + dealerName) : '';
+    const cribPhrase = cribbageGetCribOwnerPhrase(appState.cribbageDealerIndex);
+    dealerEl.textContent = dealerName ? ('Dealer: ' + dealerName + ' (' + cribPhrase + ')') : '';
   }
 
   const turnEl = document.getElementById('cribbage-status-turn');
@@ -242,6 +254,12 @@ function renderCribbageDiscardHand() {
   area.classList.toggle('hidden', !active);
   if (!active) {
     return;
+  }
+
+  const cribOwnerEl = document.getElementById('cribbage-discard-crib-owner');
+  if (cribOwnerEl) {
+    const cribPhrase = cribbageGetCribOwnerPhrase(appState.cribbageDealerIndex);
+    cribOwnerEl.textContent = cribPhrase ? ('It’s ' + cribPhrase + ' this hand.') : '';
   }
 
   cribbageBindCardGridKeys(container, { onEnter: cribbageSubmitDiscard });
@@ -527,9 +545,9 @@ function cribbageMugginsClaim() {
 // supplement only, never the sole channel for score info (see
 // renderCribbageStatus() above and the srSpeak() calls throughout this file).
 
-const CRIBBAGE_BOARD_VIEW_WIDTH = 600;
-const CRIBBAGE_BOARD_MARGIN = 24;
-const CRIBBAGE_LANE_Y = [55, 115];
+const CRIBBAGE_BOARD_VIEW_WIDTH = 950;
+const CRIBBAGE_BOARD_MARGIN = 44;
+const CRIBBAGE_LANE_Y = [50, 120];
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
 function cribbageBoardHoleX(index, targetScore) {
@@ -571,7 +589,7 @@ function cribbageBuildBoardHoles(svg, targetScore) {
       const circle = document.createElementNS(SVG_NS, 'circle');
       circle.setAttribute('cx', String(cribbageBoardHoleX(i, targetScore)));
       circle.setAttribute('cy', String(y));
-      circle.setAttribute('r', i % 5 === 0 ? '2.6' : '1.6');
+      circle.setAttribute('r', i % 5 === 0 ? '4.5' : '3');
       circle.setAttribute('class', 'cribbage-hole' + (i % 5 === 0 ? ' tick' : ''));
       svg.appendChild(circle);
     }
@@ -591,13 +609,13 @@ function cribbageBuildBoardHoles(svg, targetScore) {
     svg.appendChild(connector);
 
     const back = document.createElementNS(SVG_NS, 'circle');
-    back.setAttribute('r', '5');
+    back.setAttribute('r', '7');
     back.setAttribute('class', 'cribbage-peg cribbage-peg-back');
     back.setAttribute('data-player-index', String(lane));
     svg.appendChild(back);
 
     const front = document.createElementNS(SVG_NS, 'circle');
-    front.setAttribute('r', '5');
+    front.setAttribute('r', '8');
     front.setAttribute('class', 'cribbage-peg cribbage-peg-front');
     front.setAttribute('data-player-index', String(lane));
     svg.appendChild(front);
@@ -835,7 +853,8 @@ socket.on('cribbageHand', function (payload) {
   renderCribbageWidgets();
 
   if (payload.phase === 'discard') {
-    srSpeak('New hand. Your hand: ' + payload.hand.map(cribbageCardName).join(', '), 'polite', { canInterruptLock: true });
+    const cribPhrase = cribbageGetCribOwnerPhrase(payload.dealerIndex);
+    srSpeak('New hand. It’s ' + cribPhrase + '. Your hand: ' + payload.hand.map(cribbageCardName).join(', '), 'polite', { canInterruptLock: true });
     window.requestAnimationFrame(function () {
       cribbageFocusFirstEnabledButton(document.getElementById('cribbage-discard-hand'));
     });
@@ -853,7 +872,8 @@ socket.on('cribbageDiscardPrompt', function (payload) {
   appState.cribbagePhase = 'discard';
   appState.cribbageDealerIndex = payload.dealerIndex;
   renderCribbageWidgets();
-  srSpeak('Discard two cards to the crib.', 'assertive', { canInterruptLock: true });
+  const cribPhrase = cribbageGetCribOwnerPhrase(payload.dealerIndex);
+  srSpeak('Discard two cards to ' + cribPhrase + '.', 'assertive', { canInterruptLock: true });
 });
 
 socket.on('cribbageDiscardResult', function (payload) {

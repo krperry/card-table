@@ -177,6 +177,7 @@
         <div id="play-direction" class="play-direction"></div>
         <div id="round-result" class="round-result" aria-live="polite"></div>
         <ul id="player-summary" class="player-summary" aria-label="Players and card counts"></ul>
+        <p id="table-start-hint" class="hint"></p>
         <div class="row">
           <button id="start-game-btn" type="button">Start Game</button>
           <button id="fullscreen-toggle-btn" type="button" aria-pressed="false">Full Screen</button>
@@ -247,6 +248,7 @@
         <div id="spades-panel" class="hidden" tabindex="-1">
           <div id="spades-status" class="spades-status" aria-label="Spades game status">
             <p id="spades-status-hand"></p>
+            <p id="spades-status-team"></p>
             <p id="spades-status-partner"></p>
             <p id="spades-status-turn"></p>
             <p id="spades-status-bids"></p>
@@ -288,10 +290,11 @@
             <p id="cribbage-status-score"></p>
           </div>
 
-          <svg id="cribbage-board" class="cribbage-board" viewBox="0 0 600 140" aria-hidden="true" focusable="false"></svg>
+          <svg id="cribbage-board" class="cribbage-board" viewBox="0 0 950 170" aria-hidden="true" focusable="false"></svg>
 
           <div id="cribbage-discard-area" class="cribbage-section hidden" aria-labelledby="cribbage-discard-title">
             <h3 id="cribbage-discard-title">Discard to the crib</h3>
+            <p id="cribbage-discard-crib-owner" class="cribbage-crib-owner"></p>
             <p id="cribbage-discard-instructions" class="hint">Select two cards, then press Enter while a card is focused (or use the Confirm Discard button) to send them to the crib.</p>
             <div id="cribbage-discard-hand" class="cribbage-hand" role="group" aria-label="Your hand - select two cards to discard"></div>
             <button id="cribbage-discard-btn" type="button" disabled>Confirm Discard</button>
@@ -381,6 +384,7 @@
           <li>P: announce the cards played so far in the current trick</li>
           <li>B: announce every bid placed so far this hand</li>
           <li>R: announce your partner's name</li>
+          <li>C: announce how many tricks your team has taken, and your teammate's name</li>
           <li>S: announce your team's score</li>
           <li>Shift+S: announce both teams' scores</li>
           <li>?: open this help</li>

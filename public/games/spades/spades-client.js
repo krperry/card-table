@@ -108,6 +108,21 @@ function renderSpadesStatus() {
 
   handEl.textContent = appState.spadesHandNumber ? ('Hand ' + appState.spadesHandNumber) : '';
 
+  const teamEl = document.getElementById('spades-status-team');
+  if (teamEl) {
+    const seatIndex = getSpadesOwnSeatIndex();
+    if (seatIndex >= 0) {
+      const teamIndex = getSpadesTeamIndexForSeat(seatIndex);
+      const teamLabel = teamIndex === 0 ? 'Team A' : 'Team B';
+      teamEl.textContent = 'Your team: ' + teamLabel + ' (' + getSpadesTeamPlayerNames(teamIndex).join(' & ') + ')';
+      teamEl.classList.toggle('spades-team-a-text', teamIndex === 0);
+      teamEl.classList.toggle('spades-team-b-text', teamIndex === 1);
+    } else {
+      teamEl.textContent = '';
+      teamEl.classList.remove('spades-team-a-text', 'spades-team-b-text');
+    }
+  }
+
   const partnerEl = document.getElementById('spades-status-partner');
   if (partnerEl) {
     const partnerName = getSpadesPartnerName();
@@ -507,6 +522,22 @@ function announceSpadesPartner() {
   srSpeak(partnerName ? ('Your partner is ' + partnerName) : 'Your partner is not known yet', 'assertive', { canInterruptLock: true });
 }
 
+function announceSpadesTrickCount() {
+  const seatIndex = getSpadesOwnSeatIndex();
+  const tricksWon = appState.currentTable && appState.currentTable.spades && Array.isArray(appState.currentTable.spades.tricksWon)
+    ? appState.currentTable.spades.tricksWon
+    : null;
+  if (seatIndex < 0 || !tricksWon) {
+    srSpeak('Trick count is not available yet', 'polite', { canInterruptLock: true });
+    return;
+  }
+  const teamIndex = getSpadesTeamIndexForSeat(seatIndex);
+  const teamTricks = (tricksWon[teamIndex] || 0) + (tricksWon[teamIndex + 2] || 0);
+  const partnerName = getSpadesPartnerName();
+  const takenBy = partnerName ? ('you and ' + partnerName) : 'you';
+  srSpeak(teamTricks + (teamTricks === 1 ? ' trick taken by ' : ' tricks taken by ') + takenBy + '.', 'assertive', { canInterruptLock: true });
+}
+
 function announceSpadesOwnScore() {
   const player = getSpadesOwnPlayer();
   const score = player && typeof player.score === 'number' ? player.score : 0;
@@ -550,6 +581,9 @@ function handleSpadesKeys(event) {
     event.preventDefault();
   } else if (key === 'r') {
     announceSpadesPartner();
+    event.preventDefault();
+  } else if (key === 'c') {
+    announceSpadesTrickCount();
     event.preventDefault();
   } else if (key === 's' && event.shiftKey) {
     announceSpadesAllScores();

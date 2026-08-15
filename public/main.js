@@ -110,6 +110,7 @@ const el = {
   playDirection: document.getElementById('play-direction'),
   roundResult: document.getElementById('round-result'),
   playerSummary: document.getElementById('player-summary'),
+  tableStartHint: document.getElementById('table-start-hint'),
   startGameBtn: document.getElementById('start-game-btn'),
   leaveTableBtn: document.getElementById('leave-table-btn'),
   fullscreenToggleBtn: document.getElementById('fullscreen-toggle-btn'),
@@ -1357,6 +1358,21 @@ function render() {
       const effectivePlayerCount = appState.currentTable.players.length + computerPlayerCount;
       el.startGameBtn.disabled = !appState.isHost || effectivePlayerCount < 2 || appState.gameStatus === 'in_game';
     }
+    if (el.tableStartHint) {
+      // Lumo lets the host explicitly choose 0-5 computer players when
+      // creating the table, so there's nothing implicit to warn about there -
+      // this note is only needed for the fixed-seat-count games, and only
+      // while still waiting to start (once in_game the seats are settled).
+      if (appState.gameStatus !== 'in_game' && (isHearts || isSpades || isCribbage)) {
+        const neededSeats = isCribbage ? 2 : 4;
+        const currentPlayers = appState.currentTable.players.length;
+        el.tableStartHint.textContent = currentPlayers < neededSeats
+          ? ('This ' + (isCribbage ? 'game needs' : 'game needs exactly') + ' ' + neededSeats + ' players. Starting now will fill the remaining ' + (neededSeats - currentPlayers) + ' seat' + (neededSeats - currentPlayers === 1 ? '' : 's') + ' with computer players.')
+          : '';
+      } else {
+        el.tableStartHint.textContent = '';
+      }
+    }
     if (el.kickPlayerBtn) {
       const hasOtherPlayers = appState.currentTable.players.some(function (player) {
         return player.id !== socket.id && !player.isBot;
@@ -1440,6 +1456,14 @@ function renderPlayerSummary() {
   const cribbageTurnPlayerId = isCribbage && appState.currentTable.cribbage && appState.currentTable.cribbage.peg
     ? appState.currentTable.cribbage.peg.turnPlayerId
     : null;
+  // Every seat on a Spades team holds the same card count (13 minus tricks
+  // played), so per-seat "Cards: N" is uninformative there - show each
+  // team's combined tricks taken instead (see .spades-team-a/-b below).
+  const spadesTricksWon = isSpades && appState.currentTable.spades && Array.isArray(appState.currentTable.spades.tricksWon)
+    ? appState.currentTable.spades.tricksWon
+    : null;
+  const spadesOwnIndex = isSpades ? appState.currentTable.players.findIndex(function (p) { return p.id === socket.id; }) : -1;
+  const spadesOwnTeam = spadesOwnIndex >= 0 ? spadesOwnIndex % 2 : -1;
 
   appState.currentTable.players.forEach(function (player, index) {
     const li = document.createElement('li');
@@ -1475,11 +1499,16 @@ function renderPlayerSummary() {
       const teamLabel = index % 2 === 0 ? 'Team A' : 'Team B';
       tags.push(teamLabel);
       li.classList.add(index % 2 === 0 ? 'spades-team-a' : 'spades-team-b');
+      if (index % 2 === spadesOwnTeam) {
+        tags.push('your team');
+        li.classList.add('spades-own-team');
+      }
     }
 
-    const countText = appState.gameStatus === 'in_game'
-      ? 'Cards: ' + player.cardCount + ' | Total: ' + totalPoints
-      : 'Score: ' + totalPoints;
+    const spadesTeamTricks = spadesTricksWon ? (spadesTricksWon[index % 2] || 0) + (spadesTricksWon[(index % 2) + 2] || 0) : 0;
+    const countText = isSpades
+      ? (appState.gameStatus === 'in_game' ? ('Tricks: ' + spadesTeamTricks + ' | Total: ' + totalPoints) : 'Score: ' + totalPoints)
+      : (appState.gameStatus === 'in_game' ? ('Cards: ' + player.cardCount + ' | Total: ' + totalPoints) : 'Score: ' + totalPoints);
     const tagText = tags.length ? ' (' + tags.join(', ') + ')' : '';
 
     label.className = 'player-label';
