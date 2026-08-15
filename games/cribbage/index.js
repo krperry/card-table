@@ -234,6 +234,14 @@ module.exports = function createCribbageGame(deps) {
     const player = table.players[playerIndex];
     table.scores[player.name] = (table.scores[player.name] || 0) + points;
     table.game.handPointsThisHand[playerIndex] = (table.game.handPointsThisHand[playerIndex] || 0) + points;
+    // Push the updated score to every client immediately - sighted players
+    // see the peg move (renderCribbageBoard/renderCribbageStatus both read
+    // player.score off tableState) the instant it's earned, not just at the
+    // next incidental emitTableState() call (e.g. the next hand/phase). Blind
+    // players already hear this via the actionNotice/srSpeak announcements
+    // each awardPoints() caller sends alongside the score - this closes the
+    // matching visual gap.
+    emitTableState(table);
     return maybeEndGameMidHand(table);
   }
 
