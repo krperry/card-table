@@ -977,6 +977,73 @@ canvas {
   display: none;
 }
 
+/* Mirrors .game-board-layout/.play-history-panel (Lumo's canvas + history
+   sidebar) - the starter card sits in its own sidebar to the left of the
+   discard/pegging/show sections and stays visible there for the rest of the
+   hand, rather than as upper-left status text. */
+.cribbage-board-layout {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  margin-top: 10px;
+  width: 100%;
+}
+
+.cribbage-starter-panel {
+  width: 190px;
+  flex: 0 0 190px;
+  padding: 10px;
+  border-radius: 8px;
+  background: #ecf6f4;
+  border: 1px solid #b7d2cc;
+}
+
+.cribbage-starter-panel h3 {
+  margin: 0 0 10px;
+  font-size: 16px;
+  color: #1d4342;
+}
+
+.cribbage-starter-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  text-align: center;
+}
+
+.cribbage-starter-content img {
+  width: 100%;
+  max-width: 130px;
+  height: auto;
+}
+
+.cribbage-starter-content .cribbage-starter-name {
+  font-weight: 700;
+  color: #234544;
+}
+
+.cribbage-starter-content .cribbage-starter-heels {
+  color: #7a5c14;
+  font-weight: 700;
+}
+
+.cribbage-main-column {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+@media (max-width: 900px) {
+  .cribbage-board-layout {
+    flex-direction: column;
+  }
+
+  .cribbage-starter-panel {
+    width: 100%;
+    flex: 1 1 auto;
+  }
+}
+
 .cribbage-section {
   margin-bottom: 14px;
   padding: 10px 14px;
@@ -1054,6 +1121,34 @@ canvas {
   font-size: 13px;
   color: #234544;
   width: 130px;
+}
+
+/* The running pegging count, shown as a badge over the first card laid this
+   count rather than as separate upper-left status text - see
+   renderCribbagePegSegment() in cribbage-client.js. Decorative only: the
+   count is always separately available via .cribbage-status-turn text (my
+   turn/their turn) and the C-key/srSpeak announcements. */
+.cribbage-peg-segment-list li:first-child {
+  position: relative;
+}
+
+.cribbage-count-badge {
+  position: absolute;
+  top: -10px;
+  left: -10px;
+  min-width: 28px;
+  height: 28px;
+  padding: 0 4px;
+  border-radius: 50%;
+  background: #0d7c67;
+  color: #f8fff6;
+  font-size: 14px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+  pointer-events: none;
 }
 
 .cribbage-card-list img,

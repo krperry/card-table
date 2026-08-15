@@ -285,44 +285,53 @@
             <p id="cribbage-status-hand"></p>
             <p id="cribbage-status-dealer"></p>
             <p id="cribbage-status-turn"></p>
-            <p id="cribbage-status-count"></p>
-            <p id="cribbage-status-starter"></p>
             <p id="cribbage-status-score"></p>
           </div>
 
           <svg id="cribbage-board" class="cribbage-board" viewBox="0 0 950 170" aria-hidden="true" focusable="false"></svg>
 
-          <div id="cribbage-discard-area" class="cribbage-section hidden" aria-labelledby="cribbage-discard-title">
-            <h3 id="cribbage-discard-title">Discard to the crib</h3>
-            <p id="cribbage-discard-crib-owner" class="cribbage-crib-owner"></p>
-            <p id="cribbage-discard-instructions" class="hint">Select two cards, then press Enter while a card is focused (or use the Confirm Discard button) to send them to the crib.</p>
-            <div id="cribbage-discard-hand" class="cribbage-hand" role="group" aria-label="Your hand - select two cards to discard"></div>
-            <button id="cribbage-discard-btn" type="button" disabled>Confirm Discard</button>
-          </div>
+          <div class="cribbage-board-layout">
+            <aside id="cribbage-starter-panel" class="cribbage-starter-panel" aria-label="Starter card">
+              <h3>Starter Card</h3>
+              <div id="cribbage-starter-content" class="cribbage-starter-content">
+                <p id="cribbage-starter-empty" class="hint">Not revealed yet</p>
+              </div>
+            </aside>
 
-          <div id="cribbage-peg-area" class="cribbage-section hidden" aria-labelledby="cribbage-peg-title">
-            <h3 id="cribbage-peg-title">Pegging</h3>
-            <ul id="cribbage-peg-segment-list" class="cribbage-peg-segment-list" aria-label="Cards played so far this count"></ul>
-            <div id="cribbage-peg-hand" class="cribbage-hand" role="group" aria-label="Your hand"></div>
-            <button id="cribbage-go-btn" type="button" class="hidden">Go</button>
-          </div>
+            <div class="cribbage-main-column">
+              <div id="cribbage-discard-area" class="cribbage-section hidden" aria-labelledby="cribbage-discard-title">
+                <h3 id="cribbage-discard-title">Discard to the crib</h3>
+                <p id="cribbage-discard-crib-owner" class="cribbage-crib-owner"></p>
+                <p id="cribbage-discard-instructions" class="hint">Select two cards, then press Enter while a card is focused (or use the Confirm Discard button) to send them to the crib.</p>
+                <div id="cribbage-discard-hand" class="cribbage-hand" role="group" aria-label="Your hand - select two cards to discard"></div>
+                <button id="cribbage-discard-btn" type="button" disabled>Confirm Discard</button>
+              </div>
 
-          <div id="cribbage-show-area" class="cribbage-section hidden" aria-labelledby="cribbage-show-title">
-            <h3 id="cribbage-show-title">Counting the hand</h3>
-            <p id="cribbage-show-owner"></p>
-            <ul id="cribbage-show-cards" class="cribbage-card-list" aria-label="Cards being counted"></ul>
-            <p id="cribbage-show-breakdown"></p>
-            <button id="cribbage-show-continue-btn" type="button">Continue</button>
-          </div>
+              <div id="cribbage-peg-area" class="cribbage-section hidden" aria-labelledby="cribbage-peg-title">
+                <h3 id="cribbage-peg-title" class="visually-hidden">Pegging</h3>
+                <ul id="cribbage-peg-segment-list" class="cribbage-peg-segment-list" aria-label="Cards played so far this count"></ul>
+                <div id="cribbage-peg-hand" class="cribbage-hand" role="group" aria-label="Your hand"></div>
+                <button id="cribbage-go-btn" type="button" class="hidden">Go</button>
+              </div>
 
-          <div id="cribbage-muggins-area" class="cribbage-section hidden" aria-labelledby="cribbage-muggins-title">
-            <h3 id="cribbage-muggins-title">Count your hand</h3>
-            <ul id="cribbage-muggins-cards" class="cribbage-card-list" aria-label="Cards to count"></ul>
-            <label class="inline-label" for="cribbage-muggins-count-input">Your count
-              <input id="cribbage-muggins-count-input" type="number" min="0" step="1" value="0">
-            </label>
-            <button id="cribbage-muggins-submit-btn" type="button">Submit Count</button>
-            <button id="cribbage-muggins-claim-btn" type="button">Claim Missed Points</button>
+              <div id="cribbage-show-area" class="cribbage-section hidden" aria-labelledby="cribbage-show-title">
+                <h3 id="cribbage-show-title">Counting the hand</h3>
+                <p id="cribbage-show-owner"></p>
+                <ul id="cribbage-show-cards" class="cribbage-card-list" aria-label="Cards being counted"></ul>
+                <p id="cribbage-show-breakdown"></p>
+                <button id="cribbage-show-continue-btn" type="button">Continue</button>
+              </div>
+
+              <div id="cribbage-muggins-area" class="cribbage-section hidden" aria-labelledby="cribbage-muggins-title">
+                <h3 id="cribbage-muggins-title">Count your hand</h3>
+                <ul id="cribbage-muggins-cards" class="cribbage-card-list" aria-label="Cards to count"></ul>
+                <label class="inline-label" for="cribbage-muggins-count-input">Your count
+                  <input id="cribbage-muggins-count-input" type="number" min="0" step="1" value="0">
+                </label>
+                <button id="cribbage-muggins-submit-btn" type="button">Submit Count</button>
+                <button id="cribbage-muggins-claim-btn" type="button">Claim Missed Points</button>
+              </div>
+            </div>
           </div>
 
           <p id="cribbage-help" class="visually-hidden">

@@ -129,18 +129,6 @@ function renderCribbageStatus() {
     }
   }
 
-  const countEl = document.getElementById('cribbage-status-count');
-  if (countEl) {
-    countEl.textContent = appState.cribbagePhase === 'peg' ? ('Count: ' + appState.cribbagePegCount) : '';
-  }
-
-  const starterEl = document.getElementById('cribbage-status-starter');
-  if (starterEl) {
-    starterEl.textContent = appState.cribbageStarter
-      ? ('Starter: ' + cribbageCardName(appState.cribbageStarter) + (appState.cribbageHisHeelsAwarded ? ' (his heels!)' : ''))
-      : '';
-  }
-
   const scoreEl = document.getElementById('cribbage-status-score');
   if (scoreEl && appState.currentTable && Array.isArray(appState.currentTable.players)) {
     const parts = appState.currentTable.players.map(function (player) {
@@ -149,6 +137,61 @@ function renderCribbageStatus() {
     });
     scoreEl.textContent = 'Scores - ' + parts.join(', ') + ' (target ' + cribbageGetTargetScore() + ')';
   }
+}
+
+// --- Starter card sidebar -------------------------------------------------
+// Mirrors Lumo's play-history-panel: a sidebar next to the play area rather
+// than upper-left status text, and it stays visible for the rest of the hand
+// once the starter is cut (see .cribbage-starter-panel in style.css).
+
+function renderCribbageStarterPanel() {
+  const emptyEl = document.getElementById('cribbage-starter-empty');
+  const content = document.getElementById('cribbage-starter-content');
+  if (!content || !emptyEl) {
+    return;
+  }
+
+  if (!appState.cribbageStarter) {
+    emptyEl.classList.remove('hidden');
+    content.dataset.starterCard = '';
+    Array.prototype.forEach.call(content.querySelectorAll('.cribbage-starter-card'), function (node) {
+      node.remove();
+    });
+    return;
+  }
+
+  emptyEl.classList.add('hidden');
+  if (content.dataset.starterCard === appState.cribbageStarter) {
+    return;
+  }
+  content.dataset.starterCard = appState.cribbageStarter;
+
+  Array.prototype.forEach.call(content.querySelectorAll('.cribbage-starter-card'), function (node) {
+    node.remove();
+  });
+
+  const wrapper = document.createElement('div');
+  wrapper.className = 'cribbage-starter-card';
+
+  const img = document.createElement('img');
+  img.src = cribbageCardImageSrc(appState.cribbageStarter);
+  img.alt = '';
+  img.setAttribute('aria-hidden', 'true');
+  wrapper.appendChild(img);
+
+  const name = document.createElement('p');
+  name.className = 'cribbage-starter-name';
+  name.textContent = cribbageCardName(appState.cribbageStarter);
+  wrapper.appendChild(name);
+
+  if (appState.cribbageHisHeelsAwarded) {
+    const heels = document.createElement('p');
+    heels.className = 'cribbage-starter-heels';
+    heels.textContent = 'His heels! Dealer scores 2.';
+    wrapper.appendChild(heels);
+  }
+
+  content.appendChild(wrapper);
 }
 
 // --- Shared roving-tabindex button-grid machinery -----------------------
@@ -413,13 +456,23 @@ function renderCribbagePegSegment() {
     return;
   }
 
-  appState.cribbagePegSegment.forEach(function (entry) {
+  appState.cribbagePegSegment.forEach(function (entry, index) {
     const li = document.createElement('li');
     const img = document.createElement('img');
     img.src = cribbageCardImageSrc(entry.card);
     img.alt = '';
     img.setAttribute('aria-hidden', 'true');
     li.appendChild(img);
+    // The running count is shown as a badge over the first card laid this
+    // count, rather than as separate upper-left status text - it's always
+    // separately available via the C-key announceCribbageCount() shortcut.
+    if (index === 0) {
+      const countBadge = document.createElement('span');
+      countBadge.className = 'cribbage-count-badge';
+      countBadge.textContent = String(appState.cribbagePegCount);
+      countBadge.setAttribute('aria-hidden', 'true');
+      li.appendChild(countBadge);
+    }
     const label = document.createElement('span');
     label.textContent = entry.playerName + ': ' + cribbageCardName(entry.card);
     li.appendChild(label);
@@ -678,6 +731,7 @@ function renderCribbageBoard() {
 
 function renderCribbageWidgets() {
   renderCribbageStatus();
+  renderCribbageStarterPanel();
   renderCribbagePegSegment();
   renderCribbageDiscardHand();
   renderCribbagePegHand();
@@ -883,6 +937,13 @@ socket.on('cribbageDiscardResult', function (payload) {
   srSpeak(payload.message || (payload.success ? 'Discard submitted' : 'Discard failed'), payload.success ? 'polite' : 'assertive', { canInterruptLock: true });
   if (payload.success) {
     appState.cribbageOwnDiscardSubmitted = true;
+    // Drop the two discarded cards from the hand immediately rather than
+    // waiting for the server's next cribbageHand payload (which doesn't
+    // arrive until pegging actually starts) - otherwise they'd linger,
+    // greyed out, in the pegging hand until then.
+    const discarded = appState.cribbageSelectedDiscard;
+    appState.cribbageHand = appState.cribbageHand.filter(function (card) { return discarded.indexOf(card) === -1; });
+    appState.cribbageSelectedDiscard = [];
     renderCribbageWidgets();
   } else {
     playErrorTone();
@@ -996,8 +1057,15 @@ socket.on('cribbageShowStep', function (payload) {
 
   renderCribbageWidgets();
 
+  // Announce the actual cards being counted, not just the point total - a
+  // sighted player sees the card list via renderCribbageShow()/
+  // cribbageRenderCardList() above, but a blind player previously only heard
+  // the score, never which cards made it up (most noticeable for the crib,
+  // which no other announcement ever lists).
   const ownerLabel = payload.ownerId === socket.id ? 'Your' : (payload.ownerName + "'s");
-  let message = ownerLabel + ' ' + payload.label + ' scores ' + payload.claimedPoints + '.';
+  const cardsText = (payload.cards || []).map(cribbageCardName).join(', ');
+  const starterText = appState.cribbageStarter ? (', with the starter ' + cribbageCardName(appState.cribbageStarter)) : '';
+  let message = ownerLabel + ' ' + payload.label + ': ' + cardsText + starterText + '. Scores ' + payload.claimedPoints + ' point' + (payload.claimedPoints === 1 ? '' : 's') + '.';
   if (payload.shortfallAwardedToOpponent > 0) {
     message += ' ' + payload.shortfallAwardedToOpponent + ' missed point' + (payload.shortfallAwardedToOpponent === 1 ? '' : 's') + ' claimed.';
   }
