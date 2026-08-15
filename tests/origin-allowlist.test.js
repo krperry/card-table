@@ -35,10 +35,10 @@ function waitForServer(child, port) {
 }
 
 // Custom headers (including Origin) are only reliably delivered by
-// socket.io-client 2.x over its polling transport, not the websocket
-// transport - so these probes use polling, matching how the server's origin
-// check (engine.io's allowRequest hook) is applied on the initial HTTP
-// handshake either way.
+// socket.io-client over its polling transport, not the websocket transport -
+// so these probes use polling. The server's origin check (engine.io's
+// allowRequest hook) runs on the initial HTTP handshake either way, so this
+// exercises the same code path a websocket connection would go through.
 function attemptConnect(port, originHeader) {
   return new Promise((resolve) => {
     const socket = io('http://127.0.0.1:' + port, {
@@ -68,7 +68,7 @@ test('ORIGIN_ALLOWLIST restricts which pages may open a socket connection', asyn
       ...process.env,
       PORT: String(port),
       NODE_ENV: 'test',
-      ORIGIN_ALLOWLIST: 'http://allowed.example.com:80'
+      ORIGIN_ALLOWLIST: 'http://allowed.example.com'
     },
     stdio: ['ignore', 'pipe', 'pipe']
   });

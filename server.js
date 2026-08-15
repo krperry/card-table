@@ -8,22 +8,37 @@ const app = express();
 const http = require('http').Server(app);
 // Restricts which web pages are allowed to open a live connection to this
 // server. Set ORIGIN_ALLOWLIST to a comma-separated list of the site(s)
-// players actually load the page from (e.g. "https://cardtable.example.com"
-// or "http://203.0.113.5:4123") before deploying anywhere public - until
-// then this keeps today's behavior of allowing any origin, since the
-// deployment address isn't known yet. Socket.IO 2.x's `origins` option
-// accepts "protocol://hostname:port" entries (see its docs for the exact
-// matching rules).
+// players actually load the page from, written exactly as a browser's
+// Origin header would show it - "https://cardtable.example.com" with no
+// port (browsers omit the default 80/443), or "http://203.0.113.5:4123"
+// when the port isn't the protocol's default - before deploying anywhere
+// public. Left unset, every origin is allowed (today's behavior), since the
+// deployment address isn't known yet.
+//
+// This uses engine.io's `allowRequest` hook rather than Socket.IO's `cors`
+// option on purpose: `cors` only controls which Access-Control-Allow-Origin
+// header gets sent back, which is a promise the *browser* enforces on the
+// caller's behalf - it does nothing against a client that simply ignores
+// CORS. allowRequest actually rejects the handshake on the server before a
+// connection is ever established, regardless of what kind of client is
+// asking.
 const ORIGIN_ALLOWLIST = process.env.ORIGIN_ALLOWLIST
   ? process.env.ORIGIN_ALLOWLIST.split(',').map(function (origin) { return origin.trim(); }).filter(Boolean)
-  : '*:*';
-const io = require('socket.io')(http, {
-  // Mobile Safari can pause background tabs, delaying heartbeat responses.
-  // Allow a longer window so brief focus loss does not eject active players.
-  pingInterval: 25000,
-  pingTimeout: 300000,
-  origins: ORIGIN_ALLOWLIST
-});
+  : null;
+const io = require('socket.io')(http, Object.assign(
+  {
+    // Mobile Safari can pause background tabs, delaying heartbeat responses.
+    // Allow a longer window so brief focus loss does not eject active players.
+    pingInterval: 25000,
+    pingTimeout: 300000
+  },
+  ORIGIN_ALLOWLIST ? {
+    allowRequest: function (req, callback) {
+      const origin = req.headers.origin;
+      callback(null, !!origin && ORIGIN_ALLOWLIST.indexOf(origin) !== -1);
+    }
+  } : {}
+));
 
 const port = process.env.PORT || 4123;
 const DISCONNECT_GRACE_MS = Math.max(1000, parseInt(process.env.DISCONNECT_GRACE_MS || '45000', 10));
@@ -1248,7 +1263,7 @@ function onConnection(socket) {
 
     const removedPlayer = table.players[playerIndex];
     const tableId = table.id;
-    const targetSocket = removedPlayer.isBot ? null : io.sockets.connected[targetId];
+    const targetSocket = removedPlayer.isBot ? null : io.sockets.sockets.get(targetId);
 
     const result = removePlayerFromTable(table, playerIndex);
 
