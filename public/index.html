@@ -467,7 +467,9 @@
     <script src="games/cribbage/cribbage-client.js"></script>
     <!-- Game client modules share main.js's scope (see lumo-client.js's header
          comment); init() is called last, once every game module has finished
-         registering its socket handlers. -->
-    <script>init();</script>
+         registering its socket handlers. Kept as an external file (rather
+         than an inline <script>) so the page can run under a strict
+         Content-Security-Policy with no 'unsafe-inline' script exception. -->
+    <script src="init.js"></script>
   </body>
 </html>

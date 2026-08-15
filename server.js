@@ -1,4 +1,5 @@
 const express = require('express');
+const helmet = require('helmet');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -101,6 +102,27 @@ process.on('unhandledRejection', function (reason) {
   logServerError('unhandledRejection', reason instanceof Error ? reason : new Error(String(reason)));
 });
 
+// Every script/style/image the page loads comes from this same server (no
+// inline <script>/<style>, no third-party CDNs - see index.html/style.css),
+// so the Content-Security-Policy can stay tight instead of allowing
+// 'unsafe-inline' or external sources. upgradeInsecureRequests is turned off
+// because this app is normally run behind a reverse proxy that terminates
+// TLS (see README) - forcing it on would break plain-http local dev.
+app.use(helmet({
+  contentSecurityPolicy: {
+    useDefaults: false,
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'"],
+      styleSrc: ["'self'"],
+      imgSrc: ["'self'"],
+      connectSrc: ["'self'"],
+      objectSrc: ["'none'"],
+      baseUri: ["'self'"],
+      frameAncestors: ["'none'"]
+    }
+  }
+}));
 app.use(express.static(__dirname + '/public'));
 io.on('connection', onConnection);
 
