@@ -451,8 +451,11 @@ function createTableId() {
 }
 
 function shuffle(deck) {
+  // crypto.randomInt(), not Math.random(): players trust the shuffle can't
+  // be predicted or manipulated, and Math.random()'s internal state is not
+  // cryptographically secure.
   for (let index = deck.length - 1; index > 0; index--) {
-    const swapIndex = Math.floor(Math.random() * (index + 1));
+    const swapIndex = crypto.randomInt(index + 1);
     const temp = deck[index];
     deck[index] = deck[swapIndex];
     deck[swapIndex] = temp;
@@ -1340,6 +1343,7 @@ if (typeof module !== 'undefined' && module.exports) {
     cardType: GAME_MODULES.uno.cardType,
     cardScore: GAME_MODULES.uno.cardScore,
     describeCard: GAME_MODULES.uno.describeCard,
-    isGivePlusOneCard: GAME_MODULES.uno.isGivePlusOneCard
+    isGivePlusOneCard: GAME_MODULES.uno.isGivePlusOneCard,
+    shuffle: shuffle
   };
 }
