@@ -145,9 +145,22 @@ function renderCribbageStatus() {
 // once the starter is cut (see .cribbage-starter-panel in style.css).
 
 function renderCribbageStarterPanel() {
+  const panelEl = document.getElementById('cribbage-starter-panel');
   const emptyEl = document.getElementById('cribbage-starter-empty');
   const content = document.getElementById('cribbage-starter-content');
   if (!content || !emptyEl) {
+    return;
+  }
+
+  // While the crib is being counted, cribbageRenderCardList() already
+  // appends the starter card to the crib's own card list below - so keep
+  // this sidebar hidden then, or the starter card would appear twice on
+  // screen at once (see cribbageRenderCardList()).
+  const countingCrib = appState.cribbagePhase === 'show' && appState.cribbageShowStep === 'crib';
+  if (panelEl) {
+    panelEl.classList.toggle('hidden', countingCrib);
+  }
+  if (countingCrib) {
     return;
   }
 
@@ -815,6 +828,41 @@ function announceCribbageStarter() {
   srSpeak(appState.cribbageStarter ? ('Starter: ' + cribbageCardName(appState.cribbageStarter)) : 'No starter has been revealed yet', 'assertive', { canInterruptLock: true });
 }
 
+// Builds the "who/what/how many points" sentence for whichever show
+// (counting) step is currently active, from the appState fields
+// cribbageShowStep populates. Shared by the initial cribbageShowStep
+// announcement and the 'h' shortcut's repeat-during-counting behavior below,
+// so a blind player who missed the first read-out can re-hear it on demand.
+function cribbageBuildShowStepMessage() {
+  const ownerLabel = appState.cribbageShowOwnerId === socket.id ? 'Your' : (appState.cribbageShowOwnerName + "'s");
+  const cardsText = appState.cribbageShowCards.map(cribbageCardName).join(', ');
+  const starterText = appState.cribbageStarter ? (', with the starter ' + cribbageCardName(appState.cribbageStarter)) : '';
+  let message = ownerLabel + ' ' + appState.cribbageShowLabel + ': ' + cardsText + starterText + '. Scores ' + appState.cribbageShowClaimedPoints + ' point' + (appState.cribbageShowClaimedPoints === 1 ? '' : 's') + '.';
+  if (appState.cribbageShowShortfall > 0) {
+    message += ' ' + appState.cribbageShowShortfall + ' missed point' + (appState.cribbageShowShortfall === 1 ? '' : 's') + ' claimed.';
+  }
+  return message;
+}
+
+function announceCribbageShowStep() {
+  if (!appState.cribbageShowStep || !appState.cribbageShowCards.length) {
+    srSpeak('Nothing is being counted right now', 'polite', { canInterruptLock: true });
+    return;
+  }
+  // During a Muggins claim window the score hasn't been decided yet -
+  // cribbageShowClaimedPoints still holds the previous step's total, so
+  // repeating cribbageBuildShowStepMessage() here would read a wrong score.
+  // Read back just the cards being counted instead.
+  if (appState.cribbageMugginsOpen) {
+    const ownerLabel = appState.cribbageShowOwnerId === socket.id ? 'your' : (appState.cribbageShowOwnerName + "'s");
+    const cardsText = appState.cribbageShowCards.map(cribbageCardName).join(', ');
+    const starterText = appState.cribbageStarter ? (', with the starter ' + cribbageCardName(appState.cribbageStarter)) : '';
+    srSpeak('Counting ' + ownerLabel + ' ' + appState.cribbageShowLabel + ': ' + cardsText + starterText + '.', 'assertive', { canInterruptLock: true, lockMs: 1400 });
+    return;
+  }
+  srSpeak(cribbageBuildShowStepMessage(), 'assertive', { canInterruptLock: true, lockMs: 1400 });
+}
+
 function announceCribbageCrib() {
   if (!appState.cribbageCrib) {
     srSpeak('The crib has not been revealed yet', 'polite', { canInterruptLock: true });
@@ -853,7 +901,11 @@ function handleCribbageKeys(event) {
 
   const key = event.key.toLowerCase();
   if (key === 'h' && !event.shiftKey) {
-    announceCribbageHand();
+    if (appState.cribbagePhase === 'show') {
+      announceCribbageShowStep();
+    } else {
+      announceCribbageHand();
+    }
     event.preventDefault();
   } else if (key === 't') {
     announceCribbageStatus();
@@ -1062,14 +1114,7 @@ socket.on('cribbageShowStep', function (payload) {
   // cribbageRenderCardList() above, but a blind player previously only heard
   // the score, never which cards made it up (most noticeable for the crib,
   // which no other announcement ever lists).
-  const ownerLabel = payload.ownerId === socket.id ? 'Your' : (payload.ownerName + "'s");
-  const cardsText = (payload.cards || []).map(cribbageCardName).join(', ');
-  const starterText = appState.cribbageStarter ? (', with the starter ' + cribbageCardName(appState.cribbageStarter)) : '';
-  let message = ownerLabel + ' ' + payload.label + ': ' + cardsText + starterText + '. Scores ' + payload.claimedPoints + ' point' + (payload.claimedPoints === 1 ? '' : 's') + '.';
-  if (payload.shortfallAwardedToOpponent > 0) {
-    message += ' ' + payload.shortfallAwardedToOpponent + ' missed point' + (payload.shortfallAwardedToOpponent === 1 ? '' : 's') + ' claimed.';
-  }
-  srSpeak(message, 'assertive', { canInterruptLock: true, lockMs: 1400 });
+  srSpeak(cribbageBuildShowStepMessage(), 'assertive', { canInterruptLock: true, lockMs: 1400 });
 
   window.requestAnimationFrame(function () {
     const continueBtn = document.getElementById('cribbage-show-continue-btn');
