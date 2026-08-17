@@ -152,15 +152,15 @@ function renderCribbageStarterPanel() {
     return;
   }
 
-  // While the crib is being counted, cribbageRenderCardList() already
-  // appends the starter card to the crib's own card list below - so keep
-  // this sidebar hidden then, or the starter card would appear twice on
-  // screen at once (see cribbageRenderCardList()).
-  const countingCrib = appState.cribbagePhase === 'show' && appState.cribbageShowStep === 'crib';
+  // While a hand or the crib is being counted, cribbageRenderCardList()
+  // already appends the starter card to that hand/crib's own card list
+  // below - so keep this sidebar hidden then, or the starter card would
+  // appear twice on screen at once (see cribbageRenderCardList()).
+  const counting = appState.cribbagePhase === 'show';
   if (panelEl) {
-    panelEl.classList.toggle('hidden', countingCrib);
+    panelEl.classList.toggle('hidden', counting);
   }
-  if (countingCrib) {
+  if (counting) {
     return;
   }
 
