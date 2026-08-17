@@ -210,12 +210,19 @@ function heartsFocusFirstEnabledButton(container) {
   }
 }
 
-// Roving tabindex across a row of card buttons: Arrow keys move focus,
-// Home/End jump to the ends. Space activation is native <button> behavior,
-// so it is not re-implemented here. Enter is native activation too, *unless*
-// the caller supplies onEnter (used by the passing hand so Enter submits the
-// pass instead of toggling the focused card's selection - see
-// renderHeartsPassingHand()).
+// Roving tabindex across a row of card buttons: Left/Right Arrow move focus
+// one card at a time, Home/End jump to the ends. Space activation is native
+// <button> behavior, so it is not re-implemented here. Enter is native
+// activation too, *unless* the caller supplies onEnter (used by the passing
+// hand so Enter submits the pass instead of toggling the focused card's
+// selection - see renderHeartsPassingHand()).
+//
+// When the caller supplies getGroupKey (the hand is sorted into contiguous
+// suit runs by the server's sortHand - see games/hearts/rules.js), Up/Down
+// Arrow instead jump between suits: Up moves to the lowest card of the next
+// suit run, Down moves to the highest card of the previous suit run (both
+// wrap around the ends of the hand). Without getGroupKey, Up/Down fall back
+// to behaving exactly like Left/Right, unchanged from before.
 //
 // Bound once per container and guarded by a dataset flag rather than
 // re-bound on every render, since the container element itself persists
@@ -228,6 +235,7 @@ function heartsBindCardGridKeys(container, options) {
   container.dataset.heartsKeysBound = 'true';
 
   const onEnter = options && typeof options.onEnter === 'function' ? options.onEnter : null;
+  const getGroupKey = options && typeof options.getGroupKey === 'function' ? options.getGroupKey : null;
 
   container.addEventListener('keydown', function (event) {
     if (event.key === 'Enter' && onEnter) {
@@ -243,7 +251,20 @@ function heartsBindCardGridKeys(container, options) {
     const currentIndex = buttons.indexOf(document.activeElement);
     let nextIndex = -1;
 
-    if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
+    if (getGroupKey && currentIndex >= 0 && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) {
+      const groupKeys = buttons.map(getGroupKey);
+      let groupStart = currentIndex;
+      while (groupStart > 0 && groupKeys[groupStart - 1] === groupKeys[currentIndex]) {
+        groupStart--;
+      }
+      let groupEnd = currentIndex;
+      while (groupEnd < buttons.length - 1 && groupKeys[groupEnd + 1] === groupKeys[currentIndex]) {
+        groupEnd++;
+      }
+      nextIndex = event.key === 'ArrowUp'
+        ? (groupEnd + 1) % buttons.length
+        : (groupStart - 1 + buttons.length) % buttons.length;
+    } else if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
       nextIndex = currentIndex < 0 ? 0 : (currentIndex + 1) % buttons.length;
     } else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
       nextIndex = currentIndex < 0 ? buttons.length - 1 : (currentIndex - 1 + buttons.length) % buttons.length;
@@ -316,7 +337,10 @@ function renderHeartsPassingHand() {
     return;
   }
 
-  heartsBindCardGridKeys(container, { onEnter: heartsSubmitPass });
+  heartsBindCardGridKeys(container, {
+    onEnter: heartsSubmitPass,
+    getGroupKey: function (button) { return heartsCardSuit(button.dataset.card); }
+  });
 
   const handKey = appState.heartsHand.join(',');
   if (appState.heartsPassButtonsHandKey !== handKey) {
@@ -431,7 +455,9 @@ function renderHeartsHand() {
     return;
   }
 
-  heartsBindCardGridKeys(container);
+  heartsBindCardGridKeys(container, {
+    getGroupKey: function (button) { return heartsCardSuit(button.dataset.card); }
+  });
 
   const handKey = appState.heartsHand.join(',');
   if (appState.heartsHandButtonsHandKey !== handKey) {

@@ -263,6 +263,13 @@ function cribbageFocusFirstEnabledButton(container) {
   }
 }
 
+// When the caller supplies getGroupKey (grouping by suit, based on whatever
+// order the hand is currently displayed in - see cribbageSortHandForDisplay
+// above, which applies regardless of the value/suit sort toggle), Up/Down
+// Arrow jump between suits: Up moves to the lowest card of the next suit
+// run, Down moves to the highest card of the previous suit run (both wrap
+// around the ends of the hand). Without getGroupKey, Up/Down fall back to
+// behaving exactly like Left/Right, unchanged from before.
 function cribbageBindCardGridKeys(container, options) {
   if (container.dataset.cribbageKeysBound) {
     return;
@@ -270,6 +277,7 @@ function cribbageBindCardGridKeys(container, options) {
   container.dataset.cribbageKeysBound = 'true';
 
   const onEnter = options && typeof options.onEnter === 'function' ? options.onEnter : null;
+  const getGroupKey = options && typeof options.getGroupKey === 'function' ? options.getGroupKey : null;
 
   container.addEventListener('keydown', function (event) {
     if (event.key === 'Enter' && onEnter) {
@@ -285,7 +293,20 @@ function cribbageBindCardGridKeys(container, options) {
     const currentIndex = buttons.indexOf(document.activeElement);
     let nextIndex = -1;
 
-    if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
+    if (getGroupKey && currentIndex >= 0 && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) {
+      const groupKeys = buttons.map(getGroupKey);
+      let groupStart = currentIndex;
+      while (groupStart > 0 && groupKeys[groupStart - 1] === groupKeys[currentIndex]) {
+        groupStart--;
+      }
+      let groupEnd = currentIndex;
+      while (groupEnd < buttons.length - 1 && groupKeys[groupEnd + 1] === groupKeys[currentIndex]) {
+        groupEnd++;
+      }
+      nextIndex = event.key === 'ArrowUp'
+        ? (groupEnd + 1) % buttons.length
+        : (groupStart - 1 + buttons.length) % buttons.length;
+    } else if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
       nextIndex = currentIndex < 0 ? 0 : (currentIndex + 1) % buttons.length;
     } else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
       nextIndex = currentIndex < 0 ? buttons.length - 1 : (currentIndex - 1 + buttons.length) % buttons.length;
@@ -350,6 +371,11 @@ function cribbageToggleSortMode() {
   // without touching selection state or moving focus off this button - see
   // cribbageRebuildCardButtons()'s hadFocus check.
   renderCribbageWidgets();
+  srSpeak(
+    'Hand sorted by ' + (appState.cribbageSortMode === 'suit' ? 'suit' : 'card value') + '.',
+    'polite',
+    { canInterruptLock: true }
+  );
 }
 
 // --- Discard UI ----------------------------------------------------------
@@ -391,7 +417,10 @@ function renderCribbageDiscardHand() {
     cribOwnerEl.textContent = cribPhrase ? ('It’s ' + cribPhrase + ' this hand.') : '';
   }
 
-  cribbageBindCardGridKeys(container, { onEnter: cribbageSubmitDiscard });
+  cribbageBindCardGridKeys(container, {
+    onEnter: cribbageSubmitDiscard,
+    getGroupKey: function (button) { return cribbageCardSuit(button.dataset.card); }
+  });
 
   const handKey = appState.cribbageHand.join(',');
   if (appState.cribbageDiscardButtonsHandKey !== handKey) {
@@ -485,7 +514,9 @@ function renderCribbagePegHand() {
     return;
   }
 
-  cribbageBindCardGridKeys(container);
+  cribbageBindCardGridKeys(container, {
+    getGroupKey: function (button) { return cribbageCardSuit(button.dataset.card); }
+  });
 
   const handKey = appState.cribbageHand.join(',');
   if (appState.cribbagePegButtonsHandKey !== handKey) {

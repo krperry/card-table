@@ -253,6 +253,12 @@ function spadesFocusFirstEnabledButton(container) {
   }
 }
 
+// When the caller supplies getGroupKey (the hand is sorted into contiguous
+// suit runs - see games/spades/rules.js), Up/Down Arrow jump between suits:
+// Up moves to the lowest card of the next suit run, Down moves to the
+// highest card of the previous suit run (both wrap around the ends of the
+// hand). Without getGroupKey (e.g. the bid grid, which has no suits), Up/Down
+// fall back to behaving exactly like Left/Right, unchanged from before.
 function spadesBindCardGridKeys(container, options) {
   if (container.dataset.spadesKeysBound) {
     return;
@@ -260,6 +266,7 @@ function spadesBindCardGridKeys(container, options) {
   container.dataset.spadesKeysBound = 'true';
 
   const onEnter = options && typeof options.onEnter === 'function' ? options.onEnter : null;
+  const getGroupKey = options && typeof options.getGroupKey === 'function' ? options.getGroupKey : null;
 
   container.addEventListener('keydown', function (event) {
     if (event.key === 'Enter' && onEnter) {
@@ -275,7 +282,20 @@ function spadesBindCardGridKeys(container, options) {
     const currentIndex = buttons.indexOf(document.activeElement);
     let nextIndex = -1;
 
-    if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
+    if (getGroupKey && currentIndex >= 0 && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) {
+      const groupKeys = buttons.map(getGroupKey);
+      let groupStart = currentIndex;
+      while (groupStart > 0 && groupKeys[groupStart - 1] === groupKeys[currentIndex]) {
+        groupStart--;
+      }
+      let groupEnd = currentIndex;
+      while (groupEnd < buttons.length - 1 && groupKeys[groupEnd + 1] === groupKeys[currentIndex]) {
+        groupEnd++;
+      }
+      nextIndex = event.key === 'ArrowUp'
+        ? (groupEnd + 1) % buttons.length
+        : (groupStart - 1 + buttons.length) % buttons.length;
+    } else if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
       nextIndex = currentIndex < 0 ? 0 : (currentIndex + 1) % buttons.length;
     } else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
       nextIndex = currentIndex < 0 ? buttons.length - 1 : (currentIndex - 1 + buttons.length) % buttons.length;
@@ -392,7 +412,9 @@ function renderSpadesHand() {
     return;
   }
 
-  spadesBindCardGridKeys(container);
+  spadesBindCardGridKeys(container, {
+    getGroupKey: function (button) { return spadesCardSuit(button.dataset.card); }
+  });
 
   const handKey = appState.spadesHand.join(',');
   if (appState.spadesHandButtonsHandKey !== handKey) {

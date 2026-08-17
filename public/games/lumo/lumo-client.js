@@ -455,6 +455,32 @@ function onMouseClick(event) {
   }
 }
 
+// Hand is kept sorted by color (see compareCardsForHandSort/the 'haveCard'
+// handler below), so consecutive cards sharing cardColor() form a contiguous
+// run. Up/Down Arrow jump between those color runs: 'next' moves to the
+// lowest-value card of the next color (wrapping past the last card back to
+// the first), 'prev' moves to the highest-value card of the previous color
+// (wrapping past the first card back to the last).
+function lumoHandGroupNavIndex(direction) {
+  const hand = appState.hand;
+  const currentIndex = appState.handIndex;
+  if (!hand.length) {
+    return currentIndex;
+  }
+  const currentColor = cardColor(hand[currentIndex]);
+  let groupStart = currentIndex;
+  while (groupStart > 0 && cardColor(hand[groupStart - 1]) === currentColor) {
+    groupStart--;
+  }
+  let groupEnd = currentIndex;
+  while (groupEnd < hand.length - 1 && cardColor(hand[groupEnd + 1]) === currentColor) {
+    groupEnd++;
+  }
+  return direction === 'next'
+    ? (groupEnd + 1) % hand.length
+    : (groupStart - 1 + hand.length) % hand.length;
+}
+
 function handleGameKeys(event) {
   if (!appState.currentTable || appState.gameStatus !== 'in_game') {
     if (event.key === '?') {
@@ -501,6 +527,24 @@ function handleGameKeys(event) {
   } else if (key === 'arrowright') {
     if (appState.hand.length) {
       appState.handIndex = Math.min(appState.hand.length - 1, appState.handIndex + 1);
+      drawHand();
+      message = getSelectedCardDescription() + ' selected';
+    } else {
+      message = 'No cards in hand';
+    }
+    handled = true;
+  } else if (key === 'arrowup') {
+    if (appState.hand.length) {
+      appState.handIndex = lumoHandGroupNavIndex('next');
+      drawHand();
+      message = getSelectedCardDescription() + ' selected';
+    } else {
+      message = 'No cards in hand';
+    }
+    handled = true;
+  } else if (key === 'arrowdown') {
+    if (appState.hand.length) {
+      appState.handIndex = lumoHandGroupNavIndex('prev');
       drawHand();
       message = getSelectedCardDescription() + ' selected';
     } else {
