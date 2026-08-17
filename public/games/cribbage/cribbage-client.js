@@ -43,7 +43,11 @@ Object.assign(appState, {
   cribbageMugginsOpen: false,
   cribbagePegFront: null,
   cribbagePegBack: null,
-  cribbageBoardHolesKey: null
+  cribbageBoardHolesKey: null,
+  // Player-hand presentation preference only - never consulted by scoring/
+  // counting/pegging code, which all read straight from the server's own
+  // (unsorted-by-this-preference) state. See cribbageSortHandForDisplay().
+  cribbageSortMode: 'value'
 });
 
 function cribbageCardRank(card) {
@@ -65,6 +69,44 @@ function cribbageCardName(card) {
 
 function cribbageCardImageSrc(card) {
   return CRIBBAGE_CARD_IMAGE_BASE + card + '.svg';
+}
+
+// --- Hand sort preference (presentation only) -----------------------------
+// This section only ever reorders appState.cribbageHand, the client's own
+// copy of "what to show/announce for the player's hand". It never touches
+// server state, scoring, counting, pegging, or table.game.hands - see the
+// module header note above cribbageSortMode in the appState block.
+
+const CRIBBAGE_RANK_SORT_VALUE = {
+  A: 1, '2': 2, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8, '9': 9,
+  T: 10, J: 11, Q: 12, K: 13
+};
+const CRIBBAGE_SUIT_SORT_VALUE = { C: 0, D: 1, H: 2, S: 3 };
+
+function cribbageRankSortValue(card) {
+  return CRIBBAGE_RANK_SORT_VALUE[cribbageCardRank(card)] || 0;
+}
+
+function cribbageSuitSortValue(card) {
+  return CRIBBAGE_SUIT_SORT_VALUE[cribbageCardSuit(card)] || 0;
+}
+
+function cribbageSortCardsByValue(cards) {
+  return cards.slice().sort(function (a, b) {
+    const rankDiff = cribbageRankSortValue(a) - cribbageRankSortValue(b);
+    return rankDiff !== 0 ? rankDiff : cribbageSuitSortValue(a) - cribbageSuitSortValue(b);
+  });
+}
+
+function cribbageSortCardsBySuit(cards) {
+  return cards.slice().sort(function (a, b) {
+    const suitDiff = cribbageSuitSortValue(a) - cribbageSuitSortValue(b);
+    return suitDiff !== 0 ? suitDiff : cribbageRankSortValue(a) - cribbageRankSortValue(b);
+  });
+}
+
+function cribbageSortHandForDisplay(cards) {
+  return appState.cribbageSortMode === 'suit' ? cribbageSortCardsBySuit(cards) : cribbageSortCardsByValue(cards);
 }
 
 function cribbageGetTargetScore() {
@@ -277,6 +319,37 @@ function cribbageRebuildCardButtons(container, cards, buildButton) {
     Array.prototype.forEach.call(buttons, function (button, index) { button.tabIndex = index === restoreIndex ? 0 : -1; });
     buttons[restoreIndex].focus();
   }
+}
+
+// --- Hand sort control -----------------------------------------------------
+// Available throughout discard and pegging (whenever the player has a hand
+// on screen to sort) - a single real <button> whose label names the mode the
+// player would switch TO, per the accessibility spec for this control.
+
+function renderCribbageSortControl() {
+  const area = document.getElementById('cribbage-sort-control');
+  const button = document.getElementById('cribbage-sort-toggle-btn');
+  if (!area || !button) {
+    return;
+  }
+
+  const active = (appState.cribbagePhase === 'discard' || appState.cribbagePhase === 'peg') && appState.cribbageHand.length > 0;
+  area.classList.toggle('hidden', !active);
+  if (!active) {
+    return;
+  }
+
+  button.textContent = appState.cribbageSortMode === 'value' ? 'By suit' : 'By order';
+}
+
+function cribbageToggleSortMode() {
+  appState.cribbageSortMode = appState.cribbageSortMode === 'value' ? 'suit' : 'value';
+  appState.cribbageHand = cribbageSortHandForDisplay(appState.cribbageHand);
+  // Rebuilds the discard/peg hand button grids in the new order (their
+  // handKey is derived from the hand's own card order, so it changes here)
+  // without touching selection state or moving focus off this button - see
+  // cribbageRebuildCardButtons()'s hadFocus check.
+  renderCribbageWidgets();
 }
 
 // --- Discard UI ----------------------------------------------------------
@@ -745,6 +818,7 @@ function renderCribbageBoard() {
 function renderCribbageWidgets() {
   renderCribbageStatus();
   renderCribbageStarterPanel();
+  renderCribbageSortControl();
   renderCribbagePegSegment();
   renderCribbageDiscardHand();
   renderCribbagePegHand();
@@ -938,10 +1012,19 @@ socket.on('cribbageHand', function (payload) {
     return;
   }
 
-  appState.cribbageHand = payload.hand;
+  // A newly dealt hand (as opposed to this same event re-firing mid-hand
+  // after a peg play, or on reconnect resync) always resets the sort
+  // preference back to the "by card value" default - see the sort-mode
+  // comment on appState.cribbageSortMode above.
+  const isNewHand = payload.handNumber !== appState.cribbageHandNumber;
+  if (isNewHand) {
+    appState.cribbageSortMode = 'value';
+  }
+
   appState.cribbageHandNumber = payload.handNumber;
   appState.cribbagePhase = payload.phase;
   appState.cribbageDealerIndex = payload.dealerIndex;
+  appState.cribbageHand = cribbageSortHandForDisplay(payload.hand);
   appState.cribbageDiscardButtonsHandKey = null;
   appState.cribbagePegButtonsHandKey = null;
 
@@ -960,7 +1043,7 @@ socket.on('cribbageHand', function (payload) {
 
   if (payload.phase === 'discard') {
     const cribPhrase = cribbageGetCribOwnerPhrase(payload.dealerIndex);
-    srSpeak('New hand. It’s ' + cribPhrase + '. Your hand: ' + payload.hand.map(cribbageCardName).join(', '), 'polite', { canInterruptLock: true });
+    srSpeak('New hand. It’s ' + cribPhrase + '. Your hand: ' + appState.cribbageHand.map(cribbageCardName).join(', '), 'polite', { canInterruptLock: true });
     window.requestAnimationFrame(function () {
       cribbageFocusFirstEnabledButton(document.getElementById('cribbage-discard-hand'));
     });
@@ -1218,6 +1301,7 @@ function cribbageBindOnce(element, handler) {
 }
 
 function bindCribbageUi() {
+  cribbageBindOnce(document.getElementById('cribbage-sort-toggle-btn'), cribbageToggleSortMode);
   cribbageBindOnce(document.getElementById('cribbage-discard-btn'), cribbageSubmitDiscard);
   cribbageBindOnce(document.getElementById('cribbage-go-btn'), cribbageSayGo);
   cribbageBindOnce(document.getElementById('cribbage-show-continue-btn'), cribbageAckShow);

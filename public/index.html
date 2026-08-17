@@ -299,6 +299,11 @@
             </aside>
 
             <div class="cribbage-main-column">
+              <div id="cribbage-sort-control" class="cribbage-section hidden">
+                <h3 id="cribbage-sort-heading">Sort cards by</h3>
+                <button id="cribbage-sort-toggle-btn" type="button" aria-describedby="cribbage-sort-heading">By suit</button>
+              </div>
+
               <div id="cribbage-discard-area" class="cribbage-section hidden" aria-labelledby="cribbage-discard-title">
                 <h3 id="cribbage-discard-title">Discard to the crib</h3>
                 <p id="cribbage-discard-crib-owner" class="cribbage-crib-owner"></p>
@@ -404,7 +409,8 @@
           <li>Home/End: jump to the first/last card</li>
           <li>Enter or Space, while discarding: select or unselect the focused card (choose exactly two, then use the Confirm Discard button)</li>
           <li>Enter or Space, during pegging: play the focused card on your turn</li>
-          <li>H: announce your full hand; while a hand or the crib is being counted, repeats the cards and score being shown</li>
+          <li>H: announce your full hand in its current sort order; while a hand or the crib is being counted, repeats the cards and score being shown</li>
+          <li>Sort cards by (button, above your hand): switch your hand between sorting by card value and by suit</li>
           <li>T: announce hand number, dealer, phase, and whose turn it is</li>
           <li>C: announce the current pegging count</li>
           <li>P: announce the cards played so far this count</li>
