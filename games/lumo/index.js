@@ -1602,7 +1602,10 @@ module.exports = function createLumoGame(deps) {
       } else if (player.id === receiver.id) {
         message = giver.name + ' passes ' + cardDescription + ' to you. It is your turn.';
       } else {
-        message = giver.name + ' passes ' + cardDescription + ' to ' + receiver.name + ". It is " + receiver.name + "'s turn.";
+        // Bystanders must not learn the identity of a privately-given card -
+        // only the giver (who chose it) and the receiver (who now holds it)
+        // are told what it is; everyone else just sees that a card changed hands.
+        message = giver.name + ' passes a card to ' + receiver.name + ". It is " + receiver.name + "'s turn.";
       }
 
       io.to(player.id).emit('turnTransition', {

@@ -590,6 +590,24 @@ function bindUi() {
   canvas.addEventListener('focus', handleCanvasFocus);
 
   document.addEventListener('keydown', handleFocusCardsKey);
+  document.addEventListener('visibilitychange', handleVisibilityChangeForA11yFocus);
+}
+
+// Whichever game is active, move focus onto "the cards on the table" - the
+// Lumo canvas, or the Hearts/Spades/Cribbage hand grid. Shared by the "F"
+// keyboard shortcut below and by handleVisibilityChangeForA11yFocus, since
+// both need the exact same per-game dispatch.
+function focusActiveGameCards(options) {
+  const gameType = getActiveGameType();
+  if (gameType === 'hearts' && typeof heartsFocusHand === 'function') {
+    heartsFocusHand();
+  } else if (gameType === 'spades' && typeof spadesFocusHand === 'function') {
+    spadesFocusHand();
+  } else if (gameType === 'cribbage' && typeof cribbageFocusHand === 'function') {
+    cribbageFocusHand();
+  } else {
+    focusBoardForA11y(options);
+  }
 }
 
 // Shared "F" shortcut across all four games: a blind player can end up with
@@ -622,18 +640,37 @@ function handleFocusCardsKey(event) {
     return;
   }
 
-  const gameType = getActiveGameType();
-  if (gameType === 'hearts' && typeof heartsFocusHand === 'function') {
-    heartsFocusHand();
-  } else if (gameType === 'spades' && typeof spadesFocusHand === 'function') {
-    spadesFocusHand();
-  } else if (gameType === 'cribbage' && typeof cribbageFocusHand === 'function') {
-    cribbageFocusHand();
-  } else {
-    focusBoardForA11y({ announceOnFocus: true });
+  focusActiveGameCards({ announceOnFocus: true });
+  event.preventDefault();
+}
+
+// A player who is not the one starting the game (i.e. anyone but the host,
+// who just clicked Start Game and so definitely has the tab focused) can
+// easily have this browser tab backgrounded/inactive at the exact moment the
+// host starts the game or a new hand deals in. The one-shot
+// requestAnimationFrame focus calls elsewhere in this file (see the
+// enteredInGame branch in the tableState handler, and focusBoardForA11y
+// itself) can silently no-op in a backgrounded tab, leaving that player with
+// focus stuck on <body> and no indication anything happened - they'd have no
+// way to know the "F" shortcut above even exists yet. Retry once, automatically,
+// the moment the tab becomes visible again, but only if focus genuinely never
+// landed anywhere meaningful (don't yank focus away from wherever the player
+// deliberately tabbed to while away).
+function handleVisibilityChangeForA11yFocus() {
+  if (document.hidden) {
+    return;
+  }
+  if (!appState.currentTable || appState.gameStatus !== 'in_game') {
+    return;
+  }
+  if (appState.helpOpen || appState.announcementOpen || appState.rulesOpen || appState.kickOpen) {
+    return;
+  }
+  if (document.activeElement && document.activeElement !== document.body) {
+    return;
   }
 
-  event.preventDefault();
+  focusActiveGameCards({ announceOnFocus: true });
 }
 
 function bindPress(element, handler) {
