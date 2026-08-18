@@ -39,22 +39,17 @@ module.exports = function createCribbageGame(deps) {
   const MAX_TARGET_SCORE = 121;
   const DEFAULT_TARGET_SCORE = 121;
   const BOT_MOVE_DELAY_MS = Math.max(0, parseInt(process.env.BOT_MOVE_DELAY_MS || '900', 10));
-  // How long the non-counting player has to claim a muggins shortfall before
-  // the missed points are simply lost (see performSubmitCount()/resolveMuggins()).
-  const MUGGINS_CLAIM_WINDOW_MS = Math.max(0, parseInt(process.env.CRIBBAGE_MUGGINS_WINDOW_MS || '8000', 10));
 
   function normalizeMatchSettings(payload) {
     return {
-      targetScore: clampInteger(payload && payload.cribbageTargetScore, MIN_TARGET_SCORE, MAX_TARGET_SCORE, DEFAULT_TARGET_SCORE),
-      mugginsEnabled: !!(payload && payload.cribbageMuggins)
+      targetScore: clampInteger(payload && payload.cribbageTargetScore, MIN_TARGET_SCORE, MAX_TARGET_SCORE, DEFAULT_TARGET_SCORE)
     };
   }
 
   function getMatchSettings(table) {
     const matchSettings = table && table.matchSettings ? table.matchSettings : {};
     return {
-      targetScore: clampInteger(matchSettings.targetScore, MIN_TARGET_SCORE, MAX_TARGET_SCORE, DEFAULT_TARGET_SCORE),
-      mugginsEnabled: !!matchSettings.mugginsEnabled
+      targetScore: clampInteger(matchSettings.targetScore, MIN_TARGET_SCORE, MAX_TARGET_SCORE, DEFAULT_TARGET_SCORE)
     };
   }
 
@@ -225,7 +220,7 @@ module.exports = function createCribbageGame(deps) {
   }
 
   // Central scoring choke point: every scoring site (pegging plays, Go/31
-  // points, his heels, each show step, muggins) funnels through here, then
+  // points, his heels, each show step) funnels through here, then
   // immediately checks for game-over - Cribbage ends the instant either
   // score reaches the target, even mid-peg or mid-show, not just at hand
   // boundaries (unlike Hearts/Spades, which only check once per hand). The
@@ -550,7 +545,7 @@ module.exports = function createCribbageGame(deps) {
 
   function beginShowPhase(table) {
     table.game.phase = 'show';
-    table.game.show = { step: 'nonDealer', pendingAcks: null, pendingCount: null, lastPayload: null };
+    table.game.show = { step: 'nonDealer', pendingAcks: null, lastPayload: null };
     emitTableState(table);
     runShowStep(table);
   }
@@ -583,46 +578,18 @@ module.exports = function createCribbageGame(deps) {
 
     const owner = table.players[ownerIndex];
     const breakdown = rules.scoreFiveCards(cards, table.game.starter, isCrib);
-    const settings = getMatchSettings(table);
 
-    if (settings.mugginsEnabled) {
-      show.pendingCount = {
-        step: show.step,
-        ownerIndex: ownerIndex,
-        cards: cards.slice(),
-        label: label,
-        correctTotal: breakdown.total,
-        claimedPoints: 0,
-        claimTimer: null
-      };
-      emitTableState(table);
-      io.to(table.id).emit('cribbageShowClaimOpen', {
-        step: show.step,
-        ownerId: owner.id,
-        ownerName: owner.name,
-        cards: cards.slice(),
-        starter: table.game.starter,
-        label: label
-      });
-      return;
-    }
-
-    finishShowStepScoring(table, ownerIndex, cards, label, breakdown.total, breakdown.total, 0);
+    finishShowStepScoring(table, ownerIndex, cards, label, breakdown.total);
   }
 
-  // Shared tail for both the off-path (muggins disabled - correctTotal ===
-  // claimedPoints, no shortfall possible) and the muggins-resolved path
-  // (resolveMuggins() below) - both converge on the same cribbageShowStep
-  // broadcast shape so client rendering never has to branch on whether
-  // muggins is on.
-  function finishShowStepScoring(table, ownerIndex, cards, label, claimedPoints, correctTotal, shortfallAwardedToOpponent) {
+  function finishShowStepScoring(table, ownerIndex, cards, label, points) {
     const show = table.game.show;
     const owner = table.players[ownerIndex];
 
-    io.to(table.id).emit('actionNotice', owner.name + "'s " + label + ' scores ' + claimedPoints + '.');
+    io.to(table.id).emit('actionNotice', owner.name + "'s " + label + ' scores ' + points + '.');
 
-    if (claimedPoints > 0) {
-      if (awardPoints(table, ownerIndex, claimedPoints)) {
+    if (points > 0) {
+      if (awardPoints(table, ownerIndex, points)) {
         return;
       }
     }
@@ -634,13 +601,10 @@ module.exports = function createCribbageGame(deps) {
       cards: cards.slice(),
       starter: table.game.starter,
       label: label,
-      claimedPoints: claimedPoints,
-      correctTotal: correctTotal,
-      shortfallAwardedToOpponent: shortfallAwardedToOpponent,
+      points: points,
       ownerTotal: table.scores[owner.name] || 0
     };
 
-    show.pendingCount = null;
     show.lastPayload = payload;
     show.pendingAcks = {};
     table.players.forEach(function (player) {
@@ -652,96 +616,6 @@ module.exports = function createCribbageGame(deps) {
     emitTableState(table);
     io.to(table.id).emit('cribbageShowStep', payload);
     tryAdvanceShowStep(table);
-  }
-
-  function performSubmitCount(table, actingId, claimedPoints) {
-    if (!table || !table.game || !table.game.show || !table.game.show.pendingCount) {
-      return;
-    }
-    const pendingCount = table.game.show.pendingCount;
-    const owner = table.players[pendingCount.ownerIndex];
-    if (actingId !== owner.id) {
-      return;
-    }
-
-    const numeric = parseInt(claimedPoints, 10);
-    const clamped = Math.max(0, Math.min(pendingCount.correctTotal, Number.isFinite(numeric) ? numeric : 0));
-    pendingCount.claimedPoints = clamped;
-
-    io.to(table.id).emit('actionNotice', owner.name + ' counts ' + clamped + ' for the ' + pendingCount.label + '.');
-
-    const opponentIndex = 1 - pendingCount.ownerIndex;
-    const opponent = table.players[opponentIndex];
-
-    // Bots always claim an available shortfall immediately - a simple,
-    // no-lookahead heuristic (there is nothing to weigh: claiming missed
-    // points is always free value), matching this module's bot philosophy.
-    if (opponent.isBot) {
-      resolveMuggins(table, true);
-      return;
-    }
-
-    pendingCount.claimTimer = setTimeout(function () {
-      if (tables[table.id] !== table) {
-        return;
-      }
-      resolveMuggins(table, false);
-    }, MUGGINS_CLAIM_WINDOW_MS);
-  }
-
-  function performMugginsClaim(table, actingId) {
-    if (!table || !table.game || !table.game.show || !table.game.show.pendingCount) {
-      return;
-    }
-    const pendingCount = table.game.show.pendingCount;
-    const opponent = table.players[1 - pendingCount.ownerIndex];
-    if (actingId !== opponent.id) {
-      return;
-    }
-    if (pendingCount.claimTimer) {
-      clearTimeout(pendingCount.claimTimer);
-      pendingCount.claimTimer = null;
-    }
-    resolveMuggins(table, true);
-  }
-
-  // wasClaimed: whether the opponent actually claimed the shortfall (via
-  // cribbageMugginsClaim) before the claim window expired. An unclaimed
-  // shortfall is simply lost - it is never awarded to the under-counting
-  // owner either, matching the real "muggins" penalty.
-  function resolveMuggins(table, wasClaimed) {
-    const show = table.game.show;
-    const pendingCount = show.pendingCount;
-    if (!pendingCount) {
-      return;
-    }
-    if (pendingCount.claimTimer) {
-      clearTimeout(pendingCount.claimTimer);
-      pendingCount.claimTimer = null;
-    }
-
-    const shortfall = rules.computeMugginsShortfall(pendingCount.claimedPoints, pendingCount.correctTotal);
-    const opponentIndex = 1 - pendingCount.ownerIndex;
-    const opponent = table.players[opponentIndex];
-
-    if (wasClaimed && shortfall > 0) {
-      io.to(table.id).emit('actionNotice', opponent.name + ' claims ' + shortfall + ' missed point' + (shortfall === 1 ? '' : 's') + '.');
-      if (awardPoints(table, opponentIndex, shortfall)) {
-        return;
-      }
-    } else if (shortfall > 0) {
-      io.to(table.id).emit('actionNotice', shortfall + ' missed point' + (shortfall === 1 ? '' : 's') + ' went unclaimed and are lost.');
-    }
-
-    finishShowStepScoring(
-      table,
-      pendingCount.ownerIndex,
-      pendingCount.cards,
-      pendingCount.label,
-      pendingCount.claimedPoints,
-      pendingCount.correctTotal,
-      wasClaimed ? shortfall : 0
-    );
   }
 
   function tryAdvanceShowStep(table) {
@@ -976,7 +850,7 @@ module.exports = function createCribbageGame(deps) {
       }
       if (g.show) {
         table.game.show = Object.assign(
-          { step: 'nonDealer', pendingAcks: null, pendingCount: null, lastPayload: null },
+          { step: 'nonDealer', pendingAcks: null, lastPayload: null },
           table.game.show || {},
           g.show
         );
@@ -1014,22 +888,6 @@ module.exports = function createCribbageGame(deps) {
         return;
       }
       performPegGo(table, socket.id);
-    });
-
-    socket.on('cribbageSubmitCount', function (payload) {
-      const table = findTableBySocket(socket);
-      if (!table || table.gameType !== 'cribbage') {
-        return;
-      }
-      performSubmitCount(table, socket.id, payload && payload.claimedPoints);
-    });
-
-    socket.on('cribbageMugginsClaim', function () {
-      const table = findTableBySocket(socket);
-      if (!table || table.gameType !== 'cribbage') {
-        return;
-      }
-      performMugginsClaim(table, socket.id);
     });
 
     socket.on('cribbageAckShow', function () {

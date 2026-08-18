@@ -37,10 +37,7 @@ Object.assign(appState, {
   cribbageShowOwnerName: '',
   cribbageShowCards: [],
   cribbageShowLabel: '',
-  cribbageShowClaimedPoints: 0,
-  cribbageShowCorrectTotal: 0,
-  cribbageShowShortfall: 0,
-  cribbageMugginsOpen: false,
+  cribbageShowPoints: 0,
   cribbagePegFront: null,
   cribbagePegBack: null,
   cribbageBoardHolesKey: null,
@@ -650,7 +647,7 @@ function renderCribbageShow() {
     return;
   }
 
-  const active = appState.cribbagePhase === 'show' && !appState.cribbageMugginsOpen;
+  const active = appState.cribbagePhase === 'show';
   area.classList.toggle('hidden', !active);
   if (!active) {
     return;
@@ -664,57 +661,12 @@ function renderCribbageShow() {
   cribbageRenderCardList(list, appState.cribbageShowCards);
 
   if (breakdownEl) {
-    let text = appState.cribbageShowClaimedPoints + ' point' + (appState.cribbageShowClaimedPoints === 1 ? '' : 's') + '.';
-    if (appState.cribbageShowShortfall > 0) {
-      text += ' ' + appState.cribbageShowShortfall + ' missed point' + (appState.cribbageShowShortfall === 1 ? '' : 's') + ' claimed by the opponent.';
-    }
-    breakdownEl.textContent = text;
+    breakdownEl.textContent = appState.cribbageShowPoints + ' point' + (appState.cribbageShowPoints === 1 ? '' : 's') + '.';
   }
 }
 
 function cribbageAckShow() {
   socket.emit('cribbageAckShow');
-}
-
-// --- Muggins claim UI (only ever shown when the host enabled Muggins) ------
-
-function renderCribbageMuggins() {
-  const area = document.getElementById('cribbage-muggins-area');
-  const list = document.getElementById('cribbage-muggins-cards');
-  const submitBtn = document.getElementById('cribbage-muggins-submit-btn');
-  const claimBtn = document.getElementById('cribbage-muggins-claim-btn');
-  const input = document.getElementById('cribbage-muggins-count-input');
-  if (!area || !list) {
-    return;
-  }
-
-  area.classList.toggle('hidden', !appState.cribbageMugginsOpen);
-  if (!appState.cribbageMugginsOpen) {
-    return;
-  }
-
-  cribbageRenderCardList(list, appState.cribbageShowCards);
-
-  const isOwner = appState.cribbageShowOwnerId === socket.id;
-  if (submitBtn) {
-    submitBtn.classList.toggle('hidden', !isOwner);
-  }
-  if (input) {
-    input.classList.toggle('hidden', !isOwner);
-  }
-  if (claimBtn) {
-    claimBtn.classList.toggle('hidden', isOwner);
-  }
-}
-
-function cribbageSubmitCount() {
-  const input = document.getElementById('cribbage-muggins-count-input');
-  const claimedPoints = input ? parseInt(input.value, 10) : 0;
-  socket.emit('cribbageSubmitCount', { claimedPoints: Number.isFinite(claimedPoints) ? claimedPoints : 0 });
-}
-
-function cribbageMugginsClaim() {
-  socket.emit('cribbageMugginsClaim');
 }
 
 // --- Peg-scoring board (inline SVG, decorative) ------------------------------
@@ -866,7 +818,6 @@ function renderCribbageWidgets() {
   renderCribbageDiscardHand();
   renderCribbagePegHand();
   renderCribbageShow();
-  renderCribbageMuggins();
   renderCribbageBoard();
 }
 
@@ -954,27 +905,12 @@ function cribbageBuildShowStepMessage() {
   const ownerLabel = appState.cribbageShowOwnerId === socket.id ? 'Your' : (appState.cribbageShowOwnerName + "'s");
   const cardsText = appState.cribbageShowCards.map(cribbageCardName).join(', ');
   const starterText = appState.cribbageStarter ? (', with the starter ' + cribbageCardName(appState.cribbageStarter)) : '';
-  let message = ownerLabel + ' ' + appState.cribbageShowLabel + ': ' + cardsText + starterText + '. Scores ' + appState.cribbageShowClaimedPoints + ' point' + (appState.cribbageShowClaimedPoints === 1 ? '' : 's') + '.';
-  if (appState.cribbageShowShortfall > 0) {
-    message += ' ' + appState.cribbageShowShortfall + ' missed point' + (appState.cribbageShowShortfall === 1 ? '' : 's') + ' claimed.';
-  }
-  return message;
+  return ownerLabel + ' ' + appState.cribbageShowLabel + ': ' + cardsText + starterText + '. Scores ' + appState.cribbageShowPoints + ' point' + (appState.cribbageShowPoints === 1 ? '' : 's') + '.';
 }
 
 function announceCribbageShowStep() {
   if (!appState.cribbageShowStep || !appState.cribbageShowCards.length) {
     srSpeak('Nothing is being counted right now', 'polite', { canInterruptLock: true });
-    return;
-  }
-  // During a Muggins claim window the score hasn't been decided yet -
-  // cribbageShowClaimedPoints still holds the previous step's total, so
-  // repeating cribbageBuildShowStepMessage() here would read a wrong score.
-  // Read back just the cards being counted instead.
-  if (appState.cribbageMugginsOpen) {
-    const ownerLabel = appState.cribbageShowOwnerId === socket.id ? 'your' : (appState.cribbageShowOwnerName + "'s");
-    const cardsText = appState.cribbageShowCards.map(cribbageCardName).join(', ');
-    const starterText = appState.cribbageStarter ? (', with the starter ' + cribbageCardName(appState.cribbageStarter)) : '';
-    srSpeak('Counting ' + ownerLabel + ' ' + appState.cribbageShowLabel + ': ' + cardsText + starterText + '.', 'assertive', { canInterruptLock: true, lockMs: 1400 });
     return;
   }
   srSpeak(cribbageBuildShowStepMessage(), 'assertive', { canInterruptLock: true, lockMs: 1400 });
@@ -1096,10 +1032,7 @@ socket.on('cribbageHand', function (payload) {
     appState.cribbageMustGo = false;
     appState.cribbageShowStep = null;
     appState.cribbageShowCards = [];
-    appState.cribbageShowClaimedPoints = 0;
-    appState.cribbageShowCorrectTotal = 0;
-    appState.cribbageShowShortfall = 0;
-    appState.cribbageMugginsOpen = false;
+    appState.cribbageShowPoints = 0;
   }
 
   renderCribbageWidgets();
@@ -1240,15 +1173,12 @@ socket.on('cribbageShowStep', function (payload) {
   }
 
   appState.cribbagePhase = 'show';
-  appState.cribbageMugginsOpen = false;
   appState.cribbageShowStep = payload.step;
   appState.cribbageShowOwnerId = payload.ownerId;
   appState.cribbageShowOwnerName = payload.ownerName;
   appState.cribbageShowCards = payload.cards || [];
   appState.cribbageShowLabel = payload.label;
-  appState.cribbageShowClaimedPoints = payload.claimedPoints;
-  appState.cribbageShowCorrectTotal = payload.correctTotal;
-  appState.cribbageShowShortfall = payload.shortfallAwardedToOpponent || 0;
+  appState.cribbageShowPoints = payload.points;
   if (payload.starter) {
     appState.cribbageStarter = payload.starter;
   }
@@ -1268,40 +1198,6 @@ socket.on('cribbageShowStep', function (payload) {
       continueBtn.focus();
     }
   });
-});
-
-socket.on('cribbageShowClaimOpen', function (payload) {
-  if (!payload) {
-    return;
-  }
-
-  appState.cribbagePhase = 'show';
-  appState.cribbageMugginsOpen = true;
-  appState.cribbageShowStep = payload.step;
-  appState.cribbageShowOwnerId = payload.ownerId;
-  appState.cribbageShowOwnerName = payload.ownerName;
-  appState.cribbageShowCards = payload.cards || [];
-  appState.cribbageShowLabel = payload.label;
-  if (payload.starter) {
-    appState.cribbageStarter = payload.starter;
-  }
-
-  renderCribbageWidgets();
-
-  const isOwner = payload.ownerId === socket.id;
-  const message = isOwner
-    ? ('Count your ' + payload.label + ' and enter your total.')
-    : (payload.ownerName + ' is counting their ' + payload.label + '.');
-  srSpeak(message, 'assertive', { canInterruptLock: true, lockMs: 1200 });
-
-  if (isOwner) {
-    window.requestAnimationFrame(function () {
-      const input = document.getElementById('cribbage-muggins-count-input');
-      if (input) {
-        input.focus();
-      }
-    });
-  }
 });
 
 socket.on('cribbageHandSummary', function (payload) {
@@ -1368,8 +1264,6 @@ function bindCribbageUi() {
   cribbageBindOnce(document.getElementById('cribbage-discard-btn'), cribbageSubmitDiscard);
   cribbageBindOnce(document.getElementById('cribbage-go-btn'), cribbageSayGo);
   cribbageBindOnce(document.getElementById('cribbage-show-continue-btn'), cribbageAckShow);
-  cribbageBindOnce(document.getElementById('cribbage-muggins-submit-btn'), cribbageSubmitCount);
-  cribbageBindOnce(document.getElementById('cribbage-muggins-claim-btn'), cribbageMugginsClaim);
 
   const cribbagePanel = document.getElementById('cribbage-panel');
   if (cribbagePanel && !cribbagePanel.dataset.cribbageBound) {

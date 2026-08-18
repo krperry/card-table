@@ -555,7 +555,6 @@ test('reconnecting mid-show resends the cached show step verbatim, without doubl
             acks[p2.socket.id] = true;
             return acks;
           })(),
-          pendingCount: null,
           lastPayload: {
             step: 'nonDealer',
             ownerId: p2.socket.id,
@@ -563,9 +562,7 @@ test('reconnecting mid-show resends the cached show step verbatim, without doubl
             cards: showHands[p2Index],
             starter: '4C',
             label: 'hand',
-            claimedPoints: 5,
-            correctTotal: 5,
-            shortfallAwardedToOpponent: 0,
+            points: 5,
             ownerTotal: 5
           }
         }
@@ -590,7 +587,7 @@ test('reconnecting mid-show resends the cached show step verbatim, without doubl
 
     const resentPayload = await resentShowStepPromise;
     assert.equal(resentPayload.step, 'nonDealer');
-    assert.equal(resentPayload.claimedPoints, 5);
+    assert.equal(resentPayload.points, 5);
     assert.equal(resentPayload.ownerTotal, 5);
 
     // Three show steps remain to be acked (nonDealer, dealer, crib) before

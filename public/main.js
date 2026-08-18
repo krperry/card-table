@@ -138,7 +138,6 @@ const el = {
   cribbagePanel: document.getElementById('cribbage-panel'),
   cribbageTableSettings: document.getElementById('cribbage-table-settings'),
   newTableCribbageTargetScore: document.getElementById('new-table-cribbage-target-score'),
-  newTableCribbageMuggins: document.getElementById('new-table-cribbage-muggins'),
   helpOverlay: document.getElementById('help-overlay'),
   closeHelpBtn: document.getElementById('close-help-btn'),
   announcementOverlay: document.getElementById('announcement-overlay'),
@@ -829,8 +828,7 @@ function createTable() {
     computerSkill: el.newTableComputerSkill ? el.newTableComputerSkill.value : undefined,
     pointsToEndGame: Number.isFinite(pointsToEndGame) ? pointsToEndGame : undefined,
     targetScore: Number.isFinite(targetScore) ? targetScore : undefined,
-    cribbageTargetScore: Number.isFinite(cribbageTargetScore) ? cribbageTargetScore : undefined,
-    cribbageMuggins: !!(el.newTableCribbageMuggins && el.newTableCribbageMuggins.checked)
+    cribbageTargetScore: Number.isFinite(cribbageTargetScore) ? cribbageTargetScore : undefined
   });
 }
 
@@ -1386,8 +1384,7 @@ function render() {
         const handText = appState.gameStatus === 'in_game' && appState.currentTable.cribbage
           ? ' | Hand ' + appState.currentTable.cribbage.handNumber
           : '';
-        el.tableMatchSettings.textContent = 'Target score: ' + (matchSettings.targetScore || 121)
-          + (matchSettings.mugginsEnabled ? ' | Muggins on' : '') + handText;
+        el.tableMatchSettings.textContent = 'Target score: ' + (matchSettings.targetScore || 121) + handText;
       } else {
         const roundText = appState.gameStatus === 'in_game' && typeof appState.currentTable.roundNumber === 'number'
           ? ' | This is round ' + appState.currentTable.roundNumber + ' of ' + matchSettings.maxRounds

@@ -374,10 +374,6 @@ function getWinnerIndex(cumulativeScores) {
   return winnerIndex;
 }
 
-function computeMugginsShortfall(claimedPoints, correctTotal) {
-  return Math.max(0, correctTotal - claimedPoints);
-}
-
 module.exports = {
   RANKS: RANKS,
   SUITS: SUITS,
@@ -400,6 +396,5 @@ module.exports = {
   scoreFiveCards: scoreFiveCards,
   nextDealerIndex: nextDealerIndex,
   isGameOver: isGameOver,
-  getWinnerIndex: getWinnerIndex,
-  computeMugginsShortfall: computeMugginsShortfall
+  getWinnerIndex: getWinnerIndex
 };

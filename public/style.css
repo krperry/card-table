@@ -1174,9 +1174,7 @@ canvas {
 
 #cribbage-go-btn,
 #cribbage-discard-btn,
-#cribbage-show-continue-btn,
-#cribbage-muggins-submit-btn,
-#cribbage-muggins-claim-btn {
+#cribbage-show-continue-btn {
   margin-top: 10px;
 }
 

@@ -195,9 +195,3 @@ test('isGameOver/getWinnerIndex: the highest score wins once either score reache
   assert.equal(rules.isGameOver([61, 10], 61), true);
   assert.equal(rules.getWinnerIndex([10, 61]), 1);
 });
-
-test('computeMugginsShortfall is the positive gap between the correct total and what was claimed', () => {
-  assert.equal(rules.computeMugginsShortfall(2, 8), 6);
-  assert.equal(rules.computeMugginsShortfall(8, 8), 0);
-  assert.equal(rules.computeMugginsShortfall(10, 8), 0, 'never negative, even if the claim overshoots');
-});

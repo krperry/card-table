@@ -116,7 +116,7 @@ function startChild(port, extraEnv) {
   });
 }
 
-test('a Cribbage table can be created with default match settings (target 121, muggins off)', async () => {
+test('a Cribbage table can be created with default match settings (target 121)', async () => {
   const port = 3180;
   const child = startChild(port);
   let host;
@@ -130,7 +130,6 @@ test('a Cribbage table can be created with default match settings (target 121, m
     assert.equal(table.gameName, 'Cribbage');
     assert.equal(table.status, 'waiting');
     assert.equal(table.matchSettings.targetScore, 121);
-    assert.equal(table.matchSettings.mugginsEnabled, false);
   } finally {
     if (host && host.socket.connected) {
       host.socket.disconnect();
@@ -139,7 +138,7 @@ test('a Cribbage table can be created with default match settings (target 121, m
   }
 });
 
-test('a Cribbage table honors a 61-point short game with Muggins enabled, and clamps an out-of-range target', async () => {
+test('a Cribbage table honors a 61-point short game, and clamps an out-of-range target', async () => {
   const port = 3181;
   const child = startChild(port);
   let host;
@@ -148,9 +147,8 @@ test('a Cribbage table honors a 61-point short game with Muggins enabled, and cl
     await waitForServer(child, port);
     host = await connectAndRegister(port, `cribbage-settings-${Date.now()}@example.com`, `CribbageSettings${Date.now()}`);
 
-    const table = await createCribbageTable(host.socket, { cribbageTargetScore: 61, cribbageMuggins: true });
+    const table = await createCribbageTable(host.socket, { cribbageTargetScore: 61 });
     assert.equal(table.matchSettings.targetScore, 61);
-    assert.equal(table.matchSettings.mugginsEnabled, true);
 
     const outOfRange = await createCribbageTable(host.socket, { cribbageTargetScore: 9999 });
     assert.equal(outOfRange.matchSettings.targetScore, 121, 'an out-of-range target score should clamp back to the default');

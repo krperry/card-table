@@ -66,13 +66,6 @@ crib - each counted against the shared starter card.
 - **Nobs**: if a hand contains the Jack of the same suit as the starter, it
   scores 1 point.
 
-## Muggins (optional)
-
-Some tables enable "Muggins," an optional house rule (off by default). When
-enabled, if a player under-counts their hand or crib during the show, their
-opponent has a short window to claim the missed points for themselves
-instead. Points that go unclaimed are simply lost.
-
 ## Winning
 
 The game ends the instant either player's cumulative score reaches the

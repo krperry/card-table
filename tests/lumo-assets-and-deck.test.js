@@ -203,8 +203,8 @@ test('all user-facing UNO references in the client and server were renamed to Lu
   const combinedServerSource = serverSource + '\n' + lumoServerSource;
 
   assert.doesNotMatch(indexHtmlSource, /<title>Uno<\/title>/i);
-  assert.match(indexHtmlSource, /<title>Lumo<\/title>/);
-  assert.match(indexHtmlSource, /<h1>Lumo Online<\/h1>/);
+  assert.match(indexHtmlSource, /<title>Games<\/title>/);
+  assert.match(indexHtmlSource, /<h1>Games Online<\/h1>/);
   assert.doesNotMatch(combinedClientSource, /says UNO/);
   assert.match(combinedClientSource, /says Lumo/);
   assert.doesNotMatch(combinedServerSource, /says UNO/);
