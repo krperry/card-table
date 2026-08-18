@@ -253,6 +253,18 @@ function spadesFocusFirstEnabledButton(container) {
   }
 }
 
+// Called from main.js's shared "F" shortcut (see handleFocusCardsKey there) -
+// jumps focus straight to whichever card/bid grid is currently "the cards on
+// the table" for this player: the bid grid while it's their turn to bid, or
+// their play hand otherwise. No-op (silently) if neither is on screen right
+// now (e.g. waiting on another player's bid).
+function spadesFocusHand() {
+  const container = (appState.spadesPhase === 'bidding' && appState.spadesTurnPlayerId === socket.id)
+    ? document.getElementById('spades-bid-grid')
+    : document.getElementById('spades-hand');
+  spadesFocusFirstEnabledButton(container);
+}
+
 // When the caller supplies getGroupKey (the hand is sorted into contiguous
 // suit runs - see games/spades/rules.js), Up/Down Arrow jump between suits:
 // Up moves to the lowest card of the next suit run, Down moves to the

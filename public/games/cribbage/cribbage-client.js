@@ -263,6 +263,18 @@ function cribbageFocusFirstEnabledButton(container) {
   }
 }
 
+// Called from main.js's shared "F" shortcut (see handleFocusCardsKey there) -
+// jumps focus straight to whichever card grid is currently "the cards on the
+// table" for this player: the discard hand while a discard is still owed, or
+// the pegging hand during play. No-op (silently) if neither is on screen
+// right now (e.g. during the show/counting phase, which has no hand grid).
+function cribbageFocusHand() {
+  const container = (appState.cribbagePhase === 'discard' && !appState.cribbageOwnDiscardSubmitted)
+    ? document.getElementById('cribbage-discard-hand')
+    : document.getElementById('cribbage-peg-hand');
+  cribbageFocusFirstEnabledButton(container);
+}
+
 // When the caller supplies getGroupKey (grouping by suit, based on whatever
 // order the hand is currently displayed in - see cribbageSortHandForDisplay
 // above, which applies regardless of the value/suit sort toggle), Up/Down
@@ -1063,11 +1075,31 @@ socket.on('cribbageHand', function (payload) {
     appState.cribbageSelectedDiscard = [];
     appState.cribbageOwnDiscardSubmitted = false;
   }
-  // A fresh game always starts at hand 1 - reset the peg board's leapfrog
-  // history here rather than carrying over a stale previous game's positions.
+  // A fresh game always starts at hand 1 - clear every previous game's
+  // leftover play-area state here (peg board leapfrog history, starter card,
+  // his-heels flag, crib, pegging segment/count, and show/counting state),
+  // rather than carrying it over. Without this, restarting a finished game
+  // showed the previous game's starter card (and "His heels!" message, if
+  // any) in the starter sidebar until this new hand's own cut happened, since
+  // nothing else re-set those fields on a fresh game.
   if (payload.handNumber === 1) {
     appState.cribbagePegFront = null;
     appState.cribbagePegBack = null;
+    appState.cribbageStarter = null;
+    appState.cribbageHisHeelsAwarded = false;
+    appState.cribbageCrib = null;
+    appState.cribbagePegSegment = [];
+    appState.cribbagePegCount = 0;
+    appState.cribbageTurnPlayerId = null;
+    appState.cribbageTurnPlayerName = '';
+    appState.cribbageLegalCards = null;
+    appState.cribbageMustGo = false;
+    appState.cribbageShowStep = null;
+    appState.cribbageShowCards = [];
+    appState.cribbageShowClaimedPoints = 0;
+    appState.cribbageShowCorrectTotal = 0;
+    appState.cribbageShowShortfall = 0;
+    appState.cribbageMugginsOpen = false;
   }
 
   renderCribbageWidgets();

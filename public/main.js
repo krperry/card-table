@@ -585,6 +585,52 @@ function bindUi() {
   }
   canvas.addEventListener('keydown', handleGameKeys);
   canvas.addEventListener('focus', handleCanvasFocus);
+
+  document.addEventListener('keydown', handleFocusCardsKey);
+}
+
+// Shared "F" shortcut across all four games: a blind player can end up with
+// focus anywhere in the table view (the player roster, Leave Table, Read
+// Rules, ...) - not just inside the active game's own panel/canvas, whose own
+// keydown handlers (handleGameKeys/handleHeartsKeys/handleSpadesKeys/
+// handleCribbageKeys) only ever see keystrokes that bubble up from inside
+// that panel. Binding this one on document instead means it fires no matter
+// where focus currently is, then delegates to whichever game is active to
+// decide exactly which card grid "the cards on the table" means right now
+// (see heartsFocusHand/spadesFocusHand/cribbageFocusHand, and
+// focusBoardForA11y for Lumo, which already exists for this exact purpose).
+function handleFocusCardsKey(event) {
+  if ((event.key || '').toLowerCase() !== 'f' || event.ctrlKey || event.metaKey || event.altKey) {
+    return;
+  }
+
+  const target = event.target;
+  if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
+    return;
+  }
+
+  if (!appState.currentTable || appState.gameStatus !== 'in_game') {
+    return;
+  }
+  if (appState.helpOpen || appState.announcementOpen || appState.rulesOpen || appState.kickOpen) {
+    return;
+  }
+  if (typeof isColorPickerOpen === 'function' && isColorPickerOpen()) {
+    return;
+  }
+
+  const gameType = getActiveGameType();
+  if (gameType === 'hearts' && typeof heartsFocusHand === 'function') {
+    heartsFocusHand();
+  } else if (gameType === 'spades' && typeof spadesFocusHand === 'function') {
+    spadesFocusHand();
+  } else if (gameType === 'cribbage' && typeof cribbageFocusHand === 'function') {
+    cribbageFocusHand();
+  } else {
+    focusBoardForA11y({ announceOnFocus: true });
+  }
+
+  event.preventDefault();
 }
 
 function bindPress(element, handler) {

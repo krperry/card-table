@@ -210,6 +210,18 @@ function heartsFocusFirstEnabledButton(container) {
   }
 }
 
+// Called from main.js's shared "F" shortcut (see handleFocusCardsKey there) -
+// jumps focus straight to whichever card grid is currently "the cards on the
+// table" for this player: the passing hand while a pass is still owed, or the
+// regular play hand otherwise. No-op (silently) if neither is on screen right
+// now (e.g. between hands).
+function heartsFocusHand() {
+  const container = (appState.heartsPhase === 'passing' && !heartsAlreadyPassed())
+    ? document.getElementById('hearts-passing-hand')
+    : document.getElementById('hearts-hand');
+  heartsFocusFirstEnabledButton(container);
+}
+
 // Roving tabindex across a row of card buttons: Left/Right Arrow move focus
 // one card at a time, Home/End jump to the ends. Space activation is native
 // <button> behavior, so it is not re-implemented here. Enter is native
