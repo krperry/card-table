@@ -611,3 +611,87 @@ test('reconnecting mid-show resends the cached show step verbatim, without doubl
     child.kill('SIGTERM');
   }
 });
+
+test('restarting a table after a game ends resets scores to 0 for a rematch, even with the same players', async () => {
+  const port = 3191;
+  const child = startChild(port);
+  const sockets = [];
+
+  try {
+    await waitForServer(child, port);
+    const p1 = await connectAndRegister(port, `cribbage-restart-p1-${Date.now()}@example.com`, `CribbageRestartP1${Date.now()}`);
+    const p2 = await connectAndRegister(port, `cribbage-restart-p2-${Date.now()}@example.com`, `CribbageRestartP2${Date.now()}`);
+    sockets.push(p1.socket, p2.socket);
+
+    const table = await createCribbageTable(p1.socket, { cribbageTargetScore: 61 });
+    const joined = waitForEvent(p2.socket, 'tableState', (payload) => payload && payload.table && payload.table.id === table.id, 5000);
+    p2.socket.emit('joinTable', { tableId: table.id });
+    await joined;
+
+    const inGamePromise = waitForEvent(p1.socket, 'tableState', (payload) => payload && payload.table && payload.table.status === 'in_game', 5000);
+    p1.socket.emit('startGame');
+    const inGameTable = (await inGamePromise).table;
+
+    const p1Index = inGameTable.players.findIndex((player) => player.id === p1.socket.id);
+    const p2Index = 1 - p1Index;
+    const p1Name = inGameTable.players[p1Index].name;
+    const p2Name = inGameTable.players[p2Index].name;
+
+    const hands = [[], []];
+    hands[p1Index] = ['5C', '2D', '3D', '4D'];
+    hands[p2Index] = ['9D', '8D', '7D', '6D'];
+
+    const scores = {};
+    scores[p1Name] = 59;
+    scores[p2Name] = 50;
+
+    const testStatePayload = {
+      tableId: table.id,
+      scores: scores,
+      game: {
+        phase: 'peg',
+        dealerIndex: p2Index,
+        discardSubmitted: [true, true],
+        starter: 'KH',
+        hands: hands,
+        peg: {
+          segment: [{ playerIndex: p2Index, card: 'TD' }],
+          count: 10,
+          turnIndex: p1Index,
+          stuckIndex: null,
+          lastPlayerIndex: p2Index,
+          cardsPlayedThisHand: 1
+        }
+      }
+    };
+
+    const gameOverPromise = waitForEvent(p1.socket, 'cribbageGameOver', () => true, 5000);
+    // Table returns to the lobby (status: waiting) via a tableState broadcast
+    // sent in the same synchronous handler as cribbageGameOver, so this must
+    // be armed before the game-ending play fires, not after awaiting gameOver.
+    const waitingPromise = waitForEvent(p1.socket, 'tableState', (payload) => payload && payload.table && payload.table.status === 'waiting', 5000);
+    p1.socket.emit('__testSetTableState', testStatePayload);
+    p1.socket.emit('cribbagePlayCard', { card: '5C' }); // fifteen for 2 -> pushes p1 from 59 to 61
+
+    const gameOver = await gameOverPromise;
+    assert.equal(gameOver.winner, p1Name);
+    const p1Final = gameOver.scores.find((entry) => entry.name === p1Name);
+    assert.equal(p1Final.totalPoints, 61, 'won with a score above the old bug threshold of 61');
+
+    // Starting again with the same two players seated is the "rematch" flow
+    // that used to carry stale scores forward (the bug this test guards).
+    await waitingPromise;
+
+    const restartedPromise = waitForEvent(p1.socket, 'tableState', (payload) => payload && payload.table && payload.table.status === 'in_game', 5000);
+    p1.socket.emit('startGame');
+    const restartedTable = (await restartedPromise).table;
+
+    const restartedP1 = restartedTable.players.find((player) => player.name === p1Name);
+    const restartedP2 = restartedTable.players.find((player) => player.name === p2Name);
+    assert.equal(restartedP1.score, 0, 'the previous winner should start the rematch at 0, not 61+');
+    assert.equal(restartedP2.score, 0, 'the previous loser should also start the rematch at 0');
+  } finally {
+    sockets.forEach((socket) => { if (socket.connected) socket.disconnect(); });
+    child.kill('SIGTERM');
+  }
+});

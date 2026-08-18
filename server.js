@@ -1335,6 +1335,17 @@ function onConnection(socket) {
       return;
     }
 
+    // table.scores is a generic per-player-name map that outlives any single
+    // game/match (it's created once in createTable and never touched again by
+    // joinTable beyond seeding new players at 0). Reset it here, on every
+    // start, so a table reused for a rematch after a previous game/match
+    // ended doesn't carry stale totals into the new one - regardless of
+    // gameType, and even if the same players stay seated.
+    table.scores = {};
+    table.players.forEach(function (player) {
+      table.scores[player.name] = 0;
+    });
+
     const gameModule = GAME_MODULES[table.gameType];
     const result = gameModule ? gameModule.startGame(table) : { success: false, message: 'Unknown game type' };
     console.log('startGame result', { success: result.success, tableId: table.id, status: table.status, game: !!table.game, players: table.players.length });
