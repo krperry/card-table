@@ -4,6 +4,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
+const { createAccountStore } = require('./lib/accountStore');
 const app = express();
 const http = require('http').Server(app);
 // Restricts which web pages are allowed to open a live connection to this
@@ -58,6 +59,17 @@ const ACCOUNT_FILE_PATH = process.env.ACCOUNT_FILE_PATH
   : process.env.NODE_ENV === 'test'
     ? path.join(os.tmpdir(), 'card-table-test-accounts-' + process.pid + '.json')
     : path.join(__dirname, 'data', 'accounts.json');
+// The account store used to be a flat accounts.json array (ACCOUNT_FILE_PATH
+// above); accounts now live in SQLite instead (see lib/accountStore.js),
+// which migrates any pre-existing accounts.json into ACCOUNT_DB_PATH once,
+// the first time it finds no database there yet, then leaves the JSON file
+// alone. Mirrors ACCOUNT_FILE_PATH's env-override/test-isolation shape.
+const ACCOUNT_DB_PATH = process.env.ACCOUNT_DB_PATH
+  ? path.resolve(process.env.ACCOUNT_DB_PATH)
+  : process.env.NODE_ENV === 'test'
+    ? path.join(os.tmpdir(), 'card-table-test-accounts-' + process.pid + '.db')
+    : path.join(__dirname, 'data', 'accounts.db');
+const BAD_NAMES_FILE_PATH = path.join(__dirname, 'data', 'badnames.json');
 const LOG_FILE_PATH = path.join(__dirname, 'logs', 'server.log');
 const DEFAULT_GAME_TYPE = 'uno';
 // GAME_DEFINITIONS/GAME_MODULES are assembled further down (see "Game module
@@ -165,36 +177,60 @@ server.on('error', function (error) {
 
 let tableSequence = 1;
 const tables = {};
-const accounts = loadAccounts();
+const accountStore = createAccountStore({
+  dbPath: ACCOUNT_DB_PATH,
+  legacyJsonPath: ACCOUNT_FILE_PATH,
+  log: function (message) { writeLogLine('info', message); }
+});
 const disconnectGraceByAccountId = {};
 
-function loadAccounts() {
-  const dirPath = path.dirname(ACCOUNT_FILE_PATH);
-  if (!fs.existsSync(dirPath)) {
-    fs.mkdirSync(dirPath, { recursive: true });
-  }
-
-  if (!fs.existsSync(ACCOUNT_FILE_PATH)) {
-    const initial = { accounts: [] };
-    fs.writeFileSync(ACCOUNT_FILE_PATH, JSON.stringify(initial, null, 2));
-    return initial.accounts;
+function loadBadNames() {
+  // The blocklist mixes short, common words (from the MUD-reserved-name
+  // tradition it was drawn from) that would otherwise collide with the
+  // TestPlayer/BotSolo-style fixture names the integration test suite uses
+  // (e.g. "test", "player") - test runs disable the filter entirely rather
+  // than fighting the fixture-naming used across many test files.
+  if (process.env.NODE_ENV === 'test') {
+    return new Set();
   }
 
   try {
-    const raw = fs.readFileSync(ACCOUNT_FILE_PATH, 'utf8');
-    const parsed = JSON.parse(raw);
-    if (!parsed || !Array.isArray(parsed.accounts)) {
-      return [];
+    if (!fs.existsSync(BAD_NAMES_FILE_PATH)) {
+      return new Set();
     }
-    return parsed.accounts;
+    const parsed = JSON.parse(fs.readFileSync(BAD_NAMES_FILE_PATH, 'utf8'));
+    const blocked = parsed && Array.isArray(parsed.blocked) ? parsed.blocked : [];
+    return new Set(blocked.map(function (word) { return String(word).toLowerCase(); }));
   } catch (error) {
-    console.error('Unable to read account database:', error);
-    return [];
+    logServerError('Unable to read bad-names list, continuing with an empty list', error);
+    return new Set();
   }
 }
 
-function saveAccounts() {
-  fs.writeFileSync(ACCOUNT_FILE_PATH, JSON.stringify({ accounts: accounts }, null, 2));
+const BAD_NAMES = loadBadNames();
+
+function isDisplayNameBlocked(displayNameLower) {
+  for (const blocked of BAD_NAMES) {
+    if (displayNameLower.indexOf(blocked) !== -1) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Shared by registerAccount today and intended for a future
+// rename-display-name flow - both need the same length + blocklist checks,
+// so this is the one place that logic lives. Uniqueness (findAccountByDisplayName)
+// is deliberately not part of this helper since a rename needs to exclude the
+// caller's own current name from that check.
+function validateDisplayName(displayName) {
+  if (displayName.length > 32) {
+    return { ok: false, message: 'Display name must be 32 characters or fewer' };
+  }
+  if (isDisplayNameBlocked(normalizeDisplayName(displayName))) {
+    return { ok: false, message: 'That display name is not allowed' };
+  }
+  return { ok: true };
 }
 
 function hashPassword(password) {
@@ -254,17 +290,11 @@ function isValidEmail(email) {
 }
 
 function findAccountByEmail(email) {
-  const normalized = normalizeEmail(email);
-  return accounts.find(function (account) {
-    return account.emailLower === normalized;
-  }) || null;
+  return accountStore.findByEmail(normalizeEmail(email));
 }
 
 function findAccountByDisplayName(displayName) {
-  const normalized = normalizeDisplayName(displayName);
-  return accounts.find(function (account) {
-    return account.displayNameLower === normalized;
-  }) || null;
+  return accountStore.findByDisplayName(normalizeDisplayName(displayName));
 }
 
 function attachSocketToAccount(socket, account) {
@@ -492,7 +522,7 @@ function issueRememberToken(account) {
   const rememberToken = crypto.randomBytes(32).toString('hex');
   account.rememberTokenHash = hashRememberToken(rememberToken);
   account.rememberTokenIssuedAt = new Date().toISOString();
-  saveAccounts();
+  accountStore.update(account);
   return rememberToken;
 }
 
@@ -503,7 +533,7 @@ function clearRememberToken(account) {
 
   delete account.rememberTokenHash;
   delete account.rememberTokenIssuedAt;
-  saveAccounts();
+  accountStore.update(account);
 }
 
 function findAccountByRememberToken(token) {
@@ -511,10 +541,7 @@ function findAccountByRememberToken(token) {
     return null;
   }
 
-  const tokenHash = hashRememberToken(token);
-  return accounts.find(function (account) {
-    return account.rememberTokenHash === tokenHash;
-  }) || null;
+  return accountStore.findByRememberTokenHash(hashRememberToken(token));
 }
 
 function pickBotNames(count, excludeNamesLower) {
@@ -588,7 +615,11 @@ function buildLobbySnapshot() {
     return a.name.localeCompare(b.name);
   });
 
-  return { tables: list };
+  return {
+    tables: list,
+    connectedCount: io.engine.clientsCount,
+    signedUpCount: accountStore.count()
+  };
 }
 
 function emitLobbySnapshotAll() {
@@ -767,7 +798,8 @@ const gameRegistry = require('./games/registry')({
   emitTableState: emitTableState,
   emitLobbySnapshotAll: emitLobbySnapshotAll,
   addComputerPlayersToTable: addComputerPlayersToTable,
-  findTableBySocket: findTableBySocket
+  findTableBySocket: findTableBySocket,
+  recordGameResult: accountStore.recordGameResult
 });
 const GAME_MODULES = gameRegistry.modules;
 GAME_DEFINITIONS = gameRegistry.definitions;
@@ -924,8 +956,9 @@ function onConnection(socket) {
       return;
     }
 
-    if (displayName.length > 32) {
-      socket.emit('loginResult', { success: false, message: 'Display name must be 32 characters or fewer' });
+    const displayNameCheck = validateDisplayName(displayName);
+    if (!displayNameCheck.ok) {
+      socket.emit('loginResult', { success: false, message: displayNameCheck.message });
       return;
     }
 
@@ -954,8 +987,7 @@ function onConnection(socket) {
       createdAt: new Date().toISOString()
     };
 
-    accounts.push(account);
-    saveAccounts();
+    accountStore.insert(account);
     attachSocketToAccount(socket, account);
     reclaimSeatAfterReconnect(socket);
     const rememberToken = rememberMe ? issueRememberToken(account) : null;
@@ -1018,11 +1050,9 @@ function onConnection(socket) {
       return;
     }
 
-    const accountIndex = accounts.findIndex(function (account) {
-      return account.id === socket.accountId;
-    });
-    if (accountIndex >= 0) {
-      clearRememberToken(accounts[accountIndex]);
+    const loggingOutAccount = accountStore.findById(socket.accountId);
+    if (loggingOutAccount) {
+      clearRememberToken(loggingOutAccount);
     }
 
     clearDisconnectGraceForAccount(socket.accountId);
@@ -1044,17 +1074,14 @@ function onConnection(socket) {
         return;
       }
 
-      const accountIndex = accounts.findIndex(function (account) {
-        return account.id === socket.accountId;
-      });
+      const account = accountStore.findById(socket.accountId);
 
-      if (accountIndex < 0) {
+      if (!account) {
         clearSocketAuth(socket);
         socket.emit('deleteAccountResult', { success: false, message: 'Account not found' });
         return;
       }
 
-      const account = accounts[accountIndex];
       if (!verifyPassword(password, account.passwordSalt, account.passwordHash)) {
         socket.emit('deleteAccountResult', { success: false, message: 'Password is incorrect' });
         return;
@@ -1063,8 +1090,7 @@ function onConnection(socket) {
       clearDisconnectGraceForAccount(socket.accountId);
       leaveCurrentTable(socket, 'account_delete');
       clearRememberToken(account);
-      accounts.splice(accountIndex, 1);
-      saveAccounts();
+      accountStore.remove(account.id);
       clearSocketAuth(socket);
       socket.emit('deleteAccountResult', {
         success: true,
@@ -1081,24 +1107,20 @@ function onConnection(socket) {
       return;
     }
 
-    const accountIndex = accounts.findIndex(function (account) {
-      return account.emailLower === normalizeEmail(email);
-    });
+    const account = accountStore.findByEmail(normalizeEmail(email));
 
-    if (accountIndex < 0) {
+    if (!account) {
       socket.emit('deleteAccountResult', { success: false, message: 'Invalid email or password' });
       return;
     }
 
-    const account = accounts[accountIndex];
     if (!verifyPassword(password, account.passwordSalt, account.passwordHash)) {
       socket.emit('deleteAccountResult', { success: false, message: 'Invalid email or password' });
       return;
     }
 
     clearRememberToken(account);
-    accounts.splice(accountIndex, 1);
-    saveAccounts();
+    accountStore.remove(account.id);
     socket.emit('deleteAccountResult', {
       success: true,
       message: 'Account deleted. Display name "' + account.displayName + '" is now available.'

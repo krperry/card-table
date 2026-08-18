@@ -38,6 +38,8 @@ const appState = {
   discardChosenColor: null,
   selectedLobbyIndex: 0,
   lobbyTables: [],
+  connectedCount: null,
+  signedUpCount: null,
   gameStatus: 'waiting',
   isHost: false,
   helpOpen: false,
@@ -121,6 +123,7 @@ const el = {
   kickPlayerList: document.getElementById('kick-player-list'),
   kickPlayerCancelBtn: document.getElementById('kick-player-cancel-btn'),
   gamePickerSummary: document.getElementById('game-picker-summary'),
+  gamePickerStats: document.getElementById('game-picker-stats'),
   placeholderTitle: document.getElementById('placeholder-title'),
   placeholderMessage: document.getElementById('placeholder-message'),
   placeholderBackBtn: document.getElementById('placeholder-back-btn'),
@@ -382,6 +385,7 @@ function showGamePicker() {
   appState.selectedGameName = '';
   appState.currentTable = null;
   setScreen('game-picker');
+  socket.emit('requestLobbySnapshot');
   window.setTimeout(function () {
     if (el.selectUnoBtn) {
       el.selectUnoBtn.focus();
@@ -1284,6 +1288,12 @@ function render() {
       : 'Pick a card game to continue. Lumo, Hearts, Spades, and Cribbage are all available now.';
   }
 
+  if (el.gamePickerStats) {
+    el.gamePickerStats.textContent = typeof appState.connectedCount === 'number' && typeof appState.signedUpCount === 'number'
+      ? appState.connectedCount + ' player' + (appState.connectedCount === 1 ? '' : 's') + ' online now · ' + appState.signedUpCount + ' account' + (appState.signedUpCount === 1 ? '' : 's') + ' registered'
+      : '';
+  }
+
   const activeGameType = getActiveGameType();
   const isHearts = activeGameType === 'hearts';
   const isSpades = activeGameType === 'spades';
@@ -1757,7 +1767,10 @@ socket.on('lobbySnapshot', function (payload) {
   const tables = payload && Array.isArray(payload.tables) ? payload.tables : [];
   appState.lobbyTables = tables;
   appState.selectedLobbyIndex = Math.min(appState.selectedLobbyIndex, Math.max(0, tables.length - 1));
+  appState.connectedCount = payload && typeof payload.connectedCount === 'number' ? payload.connectedCount : appState.connectedCount;
+  appState.signedUpCount = payload && typeof payload.signedUpCount === 'number' ? payload.signedUpCount : appState.signedUpCount;
   renderLobbyTables();
+  render();
 });
 
 socket.on('tableState', function (payload) {

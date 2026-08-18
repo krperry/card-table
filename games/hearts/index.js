@@ -23,6 +23,7 @@ module.exports = function createHeartsGame(deps) {
   const emitLobbySnapshotAll = deps.emitLobbySnapshotAll;
   const addComputerPlayersToTable = deps.addComputerPlayersToTable;
   const findTableBySocket = deps.findTableBySocket;
+  const recordGameResult = deps.recordGameResult;
 
   const PLAYER_COUNT = 4;
   const MIN_POINTS_TO_END_GAME = 50;
@@ -616,6 +617,10 @@ module.exports = function createHeartsGame(deps) {
         scores: finalScores
       });
       io.to(table.id).emit('actionNotice', 'Game over. ' + table.players[winnerIndex].name + ' wins with ' + (table.scores[table.players[winnerIndex].name] || 0) + ' points.');
+
+      table.players.forEach(function (player, index) {
+        recordGameResult(player.accountId, 'hearts', index === winnerIndex ? 'win' : 'loss');
+      });
 
       table.status = 'waiting';
       table.game = null;

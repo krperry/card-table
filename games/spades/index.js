@@ -32,6 +32,7 @@ module.exports = function createSpadesGame(deps) {
   const emitLobbySnapshotAll = deps.emitLobbySnapshotAll;
   const addComputerPlayersToTable = deps.addComputerPlayersToTable;
   const findTableBySocket = deps.findTableBySocket;
+  const recordGameResult = deps.recordGameResult;
 
   const PLAYER_COUNT = 4;
   const MIN_TARGET_SCORE = 100;
@@ -567,6 +568,13 @@ module.exports = function createSpadesGame(deps) {
         teams: teamRows
       });
       io.to(table.id).emit('actionNotice', 'Game over. ' + winnerNames.join(' & ') + ' win with ' + teamTotals[winnerTeamIndex] + ' points.');
+
+      table.game.teams.forEach(function (seatIndexes, teamIndex) {
+        seatIndexes.forEach(function (seatIndex) {
+          const player = table.players[seatIndex];
+          recordGameResult(player.accountId, 'spades', teamIndex === winnerTeamIndex ? 'win' : 'loss');
+        });
+      });
 
       table.status = 'waiting';
       table.game = null;

@@ -20,6 +20,7 @@ module.exports = function createLumoGame(deps) {
   const emitTableState = deps.emitTableState;
   const emitLobbySnapshotAll = deps.emitLobbySnapshotAll;
   const addComputerPlayersToTable = deps.addComputerPlayersToTable;
+  const recordGameResult = deps.recordGameResult;
 
   const MAX_PLAYERS = 6;
   const MIN_PLAYERS = 2;
@@ -1042,6 +1043,11 @@ module.exports = function createLumoGame(deps) {
         reason: matchEndReason,
         roundNumber: roundNumber
       });
+
+      table.players.forEach(function (player) {
+        recordGameResult(player.accountId, 'uno', player.name === matchWinner.name ? 'win' : 'loss');
+      });
+
       table.status = 'waiting';
       table.game = null;
       emitTableState(table);

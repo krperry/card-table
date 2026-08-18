@@ -32,6 +32,7 @@ module.exports = function createCribbageGame(deps) {
   const emitLobbySnapshotAll = deps.emitLobbySnapshotAll;
   const addComputerPlayersToTable = deps.addComputerPlayersToTable;
   const findTableBySocket = deps.findTableBySocket;
+  const recordGameResult = deps.recordGameResult;
 
   const PLAYER_COUNT = 2;
   const MIN_TARGET_SCORE = 61;
@@ -260,6 +261,10 @@ module.exports = function createCribbageGame(deps) {
 
     io.to(table.id).emit('cribbageGameOver', { winner: winner.name, scores: finalScores });
     io.to(table.id).emit('actionNotice', 'Game over. ' + winner.name + ' wins with ' + (table.scores[winner.name] || 0) + ' points.');
+
+    table.players.forEach(function (player, index) {
+      recordGameResult(player.accountId, 'cribbage', index === winnerIndex ? 'win' : 'loss');
+    });
 
     table.status = 'waiting';
     table.game = null;
