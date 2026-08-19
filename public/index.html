@@ -361,13 +361,18 @@
             <button id="rummy-discard-btn" type="button">Discard Marked Card</button>
           </div>
 
+          <div id="rummy-sort-control" class="rummy-section hidden">
+            <h3 id="rummy-sort-heading">Sort cards by</h3>
+            <button id="rummy-sort-toggle-btn" type="button" aria-describedby="rummy-sort-heading">By suit</button>
+          </div>
+
           <div id="rummy-hand-area" class="rummy-section" aria-labelledby="rummy-hand-title">
             <h3 id="rummy-hand-title">Your Hand</h3>
             <div id="rummy-hand" class="rummy-hand" role="group" aria-label="Your hand - Space marks a card for melding or laying off, Enter discards it"></div>
           </div>
 
           <p id="rummy-help" class="visually-hidden">
-            Use the arrow keys to move between cards. Press Space to mark or unmark a card for melding or laying off, or Enter to discard the focused card and end your turn. Press M to meld the marked cards, L to lay them off onto a reviewed player's melds, D to draw from the stock, W to draw from the discard pile, and a number 1 through 6 to hear any seat's melds and set them as the lay-off target. Press question mark to open the keyboard commands dialog.
+            Use the arrow keys to move between cards. Press Space to mark or unmark a card for melding or laying off, or Enter to discard the focused card and end your turn (Enter is refused while any cards are marked - unselect them first). Press M to meld the marked cards, L to lay off the marked cards, or if nothing is marked, the focused card if it's a legal lay off, onto the meld target most recently reviewed with a 1-6 key press. Press D to draw from the stock, W to draw from the discard pile, G to toggle sorting your hand by card value or by suit, and a number 1 through 6 to hear any seat's melds and set them as the lay-off target. Press question mark to open the keyboard commands dialog.
           </p>
           <p class="hint">Mouse, touch, and keyboard are all supported. Press question mark for keyboard commands.</p>
         </div>
@@ -449,7 +454,7 @@
           <li>Enter or Space, while discarding: select or unselect the focused card (choose exactly two, then use the Confirm Discard button)</li>
           <li>Enter or Space, during pegging: play the focused card on your turn</li>
           <li>H: announce your full hand in its current sort order; while a hand or the crib is being counted, repeats the cards and score being shown</li>
-          <li>Sort cards by (button, above your hand): switch your hand between sorting by card value and by suit</li>
+          <li>Sort cards by (button, above your hand), or G: switch your hand between sorting by card value and by suit</li>
           <li>T: announce hand number, dealer, phase, and whose turn it is</li>
           <li>C: announce the current pegging count</li>
           <li>P: announce the cards played so far this count</li>
@@ -467,12 +472,13 @@
           <li>Down Arrow: jump to the highest card of the previous suit</li>
           <li>Home/End: jump to the first/last card</li>
           <li>Space: mark or unmark the focused card for the next meld or lay-off</li>
-          <li>Enter: discard the focused card immediately, ending your turn (only once you have drawn this turn)</li>
+          <li>Enter: discard the focused card immediately, ending your turn (only once you have drawn this turn; refused while any cards are marked - unselect them first)</li>
           <li>M: meld all marked cards as a new set or run (your turn, after drawing)</li>
-          <li>L: lay off all marked cards onto the meld target most recently reviewed with a 1-6 key press</li>
+          <li>L: lay off the marked cards, or - if nothing is marked - the focused card, onto the meld target most recently reviewed with a 1-6 key press, provided it's a legal extension</li>
           <li>1-6: announce seat N's melds and set seat N as the lay-off target for L (works any time, not just your turn - reviewing your own seat's melds is allowed too)</li>
           <li>D: draw from the stock (your turn, before acting)</li>
           <li>W: draw from the discard pile (your turn, before acting)</li>
+          <li>Sort cards by (button, above your hand), or G: switch your hand between sorting by card value and by suit</li>
           <li>H: announce your full hand</li>
           <li>T: announce hand number, phase, whose turn it is, and your own seat number</li>
           <li>P: announce the discard pile's top card and how many cards remain in the stock</li>

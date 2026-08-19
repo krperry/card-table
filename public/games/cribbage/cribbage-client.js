@@ -981,6 +981,11 @@ function handleCribbageKeys(event) {
   } else if (key === 's') {
     announceCribbageOwnScore();
     event.preventDefault();
+  } else if (key === 'g') {
+    if ((appState.cribbagePhase === 'discard' || appState.cribbagePhase === 'peg') && appState.cribbageHand.length > 0) {
+      cribbageToggleSortMode();
+    }
+    event.preventDefault();
   }
 }
 

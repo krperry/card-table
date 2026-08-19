@@ -41,7 +41,10 @@ Object.assign(appState, {
   rummyMelds: [],
   rummySelectedCards: [],
   rummyLayoffTargetSeat: null,
-  rummyHandButtonsHandKey: null
+  rummyHandButtonsHandKey: null,
+  // Player-hand presentation preference only - never consulted by
+  // server-authoritative meld/lay-off/discard logic. See rummyDisplayHand().
+  rummySortMode: 'value'
 });
 
 function rummyCardRank(card) {
@@ -69,14 +72,28 @@ function rummyRankOrderValue(card) {
   return RUMMY_RANK_ORDER[rummyCardRank(card)] || 0;
 }
 
-function rummyDisplayHand() {
-  return appState.rummyHand.slice().sort(function (a, b) {
-    const suitDiff = RUMMY_SUIT_SORT[rummyCardSuit(a)] - RUMMY_SUIT_SORT[rummyCardSuit(b)];
-    if (suitDiff !== 0) {
-      return suitDiff;
-    }
-    return rummyRankOrderValue(a) - rummyRankOrderValue(b);
+// --- Hand sort preference (presentation only) -----------------------------
+// Mirrors cribbage-client.js's cribbageSortMode section exactly - only ever
+// reorders appState.rummyHand, the client's own copy of "what to show/
+// announce for the player's hand". Never touches server state, melding, or
+// table.game.hands.
+
+function rummySortCardsByValue(cards) {
+  return cards.slice().sort(function (a, b) {
+    const rankDiff = rummyRankOrderValue(a) - rummyRankOrderValue(b);
+    return rankDiff !== 0 ? rankDiff : RUMMY_SUIT_SORT[rummyCardSuit(a)] - RUMMY_SUIT_SORT[rummyCardSuit(b)];
   });
+}
+
+function rummySortCardsBySuit(cards) {
+  return cards.slice().sort(function (a, b) {
+    const suitDiff = RUMMY_SUIT_SORT[rummyCardSuit(a)] - RUMMY_SUIT_SORT[rummyCardSuit(b)];
+    return suitDiff !== 0 ? suitDiff : rummyRankOrderValue(a) - rummyRankOrderValue(b);
+  });
+}
+
+function rummyDisplayHand() {
+  return appState.rummySortMode === 'suit' ? rummySortCardsBySuit(appState.rummyHand) : rummySortCardsByValue(appState.rummyHand);
 }
 
 // --- Seat helpers ------------------------------------------------------------
@@ -312,6 +329,42 @@ function rummyRebuildCardButtons(container, items, buildButton) {
   }
 }
 
+// --- Hand sort control -----------------------------------------------------
+// Available whenever the hand is shown - a single real <button> whose label
+// names the mode the player would switch TO, mirroring
+// cribbage-client.js's renderCribbageSortControl()/cribbageToggleSortMode()
+// exactly.
+
+function renderRummySortControl() {
+  const area = document.getElementById('rummy-sort-control');
+  const button = document.getElementById('rummy-sort-toggle-btn');
+  if (!area || !button) {
+    return;
+  }
+
+  const active = appState.rummyPhase && appState.rummyPhase !== 'waiting' && appState.rummyHand.length > 0;
+  area.classList.toggle('hidden', !active);
+  if (!active) {
+    return;
+  }
+
+  button.textContent = appState.rummySortMode === 'value' ? 'By suit' : 'By order';
+}
+
+function rummyToggleSortMode() {
+  appState.rummySortMode = appState.rummySortMode === 'value' ? 'suit' : 'value';
+  // The hand-button rebuild is keyed off displayHand.join(',') (see
+  // renderRummyHand()), which won't change on a re-sort since it's the same
+  // cards in a new order - reset the key so the grid actually rebuilds.
+  appState.rummyHandButtonsHandKey = null;
+  renderRummyWidgets();
+  srSpeak(
+    'Hand sorted by ' + (appState.rummySortMode === 'suit' ? 'suit' : 'card value') + '.',
+    'polite',
+    { canInterruptLock: true }
+  );
+}
+
 // --- Hand UI -----------------------------------------------------------------
 // Space (native button activation) marks/unmarks a card for the next meld or
 // lay-off commit (M / L, or the matching buttons); Enter discards the
@@ -406,6 +459,14 @@ function rummyAttemptDiscardFocused() {
   if (!card) {
     return;
   }
+  if (appState.rummySelectedCards.length > 0) {
+    const message = appState.rummySelectedCards.length === 1
+      ? 'Unselect the marked card before discarding.'
+      : 'Unselect the ' + appState.rummySelectedCards.length + ' marked cards before discarding.';
+    setTableStatus(message, 'alert');
+    srSpeak(message, 'assertive', { canInterruptLock: true });
+    return;
+  }
   rummyAttemptDiscard(card);
 }
 
@@ -425,16 +486,78 @@ function rummyCommitMeld() {
   socket.emit('rummyMeldCards', { cards: appState.rummySelectedCards.slice() });
 }
 
+// Client-side duplicate of games/rummy/rules.js's canExtendMeld (pure,
+// no io/table there either) - used only to decide whether L's "no cards
+// marked, but one is focused" fallback (below) should treat that focused
+// card as an implicit lay-off selection. The server's performLayOffCards
+// remains the sole source of truth and re-validates independently either
+// way - this is purely an informational pre-check to avoid a doomed
+// round trip and to give the player specific feedback.
+function rummyCardCanExtendGroup(card, group) {
+  if (!group || !Array.isArray(group.cards) || !group.cards.length) {
+    return false;
+  }
+  if (group.type === 'set') {
+    if (group.cards.length >= 4) {
+      return false;
+    }
+    if (rummyCardRank(card) !== rummyCardRank(group.cards[0])) {
+      return false;
+    }
+    return !group.cards.some(function (c) { return rummyCardSuit(c) === rummyCardSuit(card); });
+  }
+  if (group.type === 'run') {
+    if (rummyCardSuit(card) !== rummyCardSuit(group.cards[0])) {
+      return false;
+    }
+    const values = group.cards.map(rummyRankOrderValue);
+    const minValue = Math.min.apply(null, values);
+    const maxValue = Math.max.apply(null, values);
+    const cardValue = rummyRankOrderValue(card);
+    return cardValue === minValue - 1 || cardValue === maxValue + 1;
+  }
+  return false;
+}
+
+function rummyCardCanExtendAnyGroup(card, groups) {
+  return Array.isArray(groups) && groups.some(function (group) { return rummyCardCanExtendGroup(card, group); });
+}
+
+function rummyGetFocusedHandCard() {
+  const container = document.getElementById('rummy-hand');
+  const focused = document.activeElement;
+  if (!container || !focused || !container.contains(focused) || !focused.dataset) {
+    return null;
+  }
+  return focused.dataset.card || null;
+}
+
 function rummyCommitLayoff() {
   if (appState.rummyLayoffTargetSeat === null) {
     srSpeak('Review a player’s melds first - press 1 through 6', 'assertive', { canInterruptLock: true });
     return;
   }
-  if (!appState.rummySelectedCards.length) {
-    srSpeak('Select at least one card to lay off', 'assertive', { canInterruptLock: true });
-    return;
+
+  let cards = appState.rummySelectedCards.slice();
+
+  if (!cards.length) {
+    const focusedCard = rummyGetFocusedHandCard();
+    const groups = appState.rummyMelds[appState.rummyLayoffTargetSeat] || [];
+    if (focusedCard && rummyCardCanExtendAnyGroup(focusedCard, groups)) {
+      appState.rummySelectedCards = [focusedCard];
+      cards = [focusedCard];
+      renderRummyHand();
+      srSpeak('Marked ' + rummyCardName(focusedCard) + ' for lay off.', 'polite', { canInterruptLock: true });
+    } else if (focusedCard) {
+      srSpeak(rummyCardName(focusedCard) + ' cannot be laid off on that player’s melds.', 'assertive', { canInterruptLock: true });
+      return;
+    } else {
+      srSpeak('Select at least one card to lay off', 'assertive', { canInterruptLock: true });
+      return;
+    }
   }
-  socket.emit('rummyLayOffCards', { targetPlayerIndex: appState.rummyLayoffTargetSeat, cards: appState.rummySelectedCards.slice() });
+
+  socket.emit('rummyLayOffCards', { targetPlayerIndex: appState.rummyLayoffTargetSeat, cards: cards });
 }
 
 // --- Control buttons (mouse equivalents of the keyboard shortcuts) -----------
@@ -472,6 +595,7 @@ function renderRummyControlButtons() {
 function renderRummyWidgets() {
   renderRummyStatus();
   renderRummyMeldBoard();
+  renderRummySortControl();
   renderRummyHand();
   renderRummyControlButtons();
 }
@@ -594,6 +718,11 @@ function handleRummyKeys(event) {
     event.preventDefault();
   } else if (key === 's') {
     announceRummyOwnScore();
+    event.preventDefault();
+  } else if (key === 'g') {
+    if (appState.rummyPhase && appState.rummyPhase !== 'waiting' && appState.rummyHand.length > 0) {
+      rummyToggleSortMode();
+    }
     event.preventDefault();
   }
 }
@@ -751,6 +880,7 @@ socket.on('rummyGameOver', function (payload) {
 // --- Wiring -----------------------------------------------------------------
 
 function rummyBindControls() {
+  bindPress(document.getElementById('rummy-sort-toggle-btn'), rummyToggleSortMode);
   bindPress(document.getElementById('rummy-draw-stock-btn'), rummyAttemptDrawStock);
   bindPress(document.getElementById('rummy-draw-discard-btn'), rummyAttemptDrawDiscard);
   bindPress(document.getElementById('rummy-meld-btn'), rummyCommitMeld);
