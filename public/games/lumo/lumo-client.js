@@ -1552,7 +1552,7 @@ socket.on('turnTransition', function (payload) {
     return;
   }
 
-  if (payload.actorHasUno && payload.action === 'play') {
+  if (payload.actorHasUno && (payload.action === 'play' || payload.action === 'give_resolve')) {
     const actorIsYou = payload.actorId === socket.id;
     const actorName = payload.actorName || 'A player';
     const unoSpeech = window.CardTableUnoSpeech && typeof window.CardTableUnoSpeech.buildUnoSpeechText === 'function'

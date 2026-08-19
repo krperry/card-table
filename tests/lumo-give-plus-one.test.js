@@ -224,11 +224,16 @@ test('a Give Plus One card can be legally played and transfers the chosen card t
     const nextTurnPromise = waitForEvent(guestOne.socket, 'turnPlayer', function (payload) {
       return payload && payload.id === guestOne.socket.id;
     }, 5000);
+    // The giver started with 3 cards (1000, 5, 9): playing the Give Plus One left 2,
+    // and giving away card 5 leaves exactly 1 - this must be announced as Lumo.
+    const lumoNoticePromise = waitForEvent(guestTwo.socket, 'actionNotice', function (message) {
+      return typeof message === 'string' && /says Lumo/i.test(message);
+    }, 5000);
 
     host.socket.emit('submitGiveCard', { card: 5 });
 
-    const [giverMessage, receiverMessage, bystanderMessage, receiverHand, nextTurn] = await Promise.all([
-      giverMessagePromise, receiverMessagePromise, bystanderMessagePromise, receiverHandPromise, nextTurnPromise
+    const [giverMessage, receiverMessage, bystanderMessage, receiverHand, nextTurn, lumoNotice] = await Promise.all([
+      giverMessagePromise, receiverMessagePromise, bystanderMessagePromise, receiverHandPromise, nextTurnPromise, lumoNoticePromise
     ]);
 
     assert.match(giverMessage.message, /You pass .*5 red/i);
@@ -239,6 +244,8 @@ test('a Give Plus One card can be legally played and transfers the chosen card t
     assert.doesNotMatch(bystanderMessage.message, /5 red/i);
     assert.ok(receiverHand.indexOf(5) !== -1);
     assert.equal(nextTurn.id, guestOne.socket.id);
+    assert.equal(giverMessage.actorHasUno, true, 'giver ending with one card must be flagged as having Lumo');
+    assert.match(lumoNotice, new RegExp(host.payload.name + ' says Lumo', 'i'));
   } finally {
     if (host && host.socket.connected) host.socket.disconnect();
     if (guestOne && guestOne.socket.connected) guestOne.socket.disconnect();

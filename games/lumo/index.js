@@ -1592,6 +1592,10 @@ module.exports = function createLumoGame(deps) {
     io.to(receiver.id).emit('haveCard', receiver.hand);
 
     const cardDescription = describeCardForAnnouncement(card);
+    const giverHasUno = giver.hand.length === 1;
+    if (giverHasUno) {
+      io.to(table.id).emit('actionNotice', giver.name + ' says Lumo');
+    }
     advanceTurn(table, 1);
     emitTableState(table);
 
@@ -1612,6 +1616,7 @@ module.exports = function createLumoGame(deps) {
         action: 'give_resolve',
         actorId: giver.id,
         actorName: giver.name,
+        actorHasUno: giverHasUno,
         nextPlayerId: receiver.id,
         nextPlayerName: receiver.name,
         message: message
