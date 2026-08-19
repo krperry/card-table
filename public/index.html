@@ -41,6 +41,7 @@
           <button id="select-hearts-btn" type="button" class="game-option">Hearts</button>
           <button id="select-spades-btn" type="button" class="game-option">Spades</button>
           <button id="select-cribbage-btn" type="button" class="game-option">Cribbage</button>
+          <button id="select-rummy-btn" type="button" class="game-option">Rummy</button>
         </div>
       </section>
 
@@ -156,6 +157,18 @@
             </label>
           </div>
           <p class="hint">Cribbage is always a two-player game. If only one player has joined, starting the table fills the second seat with a computer player.</p>
+        </div>
+        <div id="rummy-table-settings" class="hidden">
+          <div class="row">
+            <label class="inline-label" for="new-table-rummy-target-score">Target score to win
+              <select id="new-table-rummy-target-score">
+                <option value="100">100 (short game)</option>
+                <option value="250">250</option>
+                <option value="500" selected>500 (standard game)</option>
+              </select>
+            </label>
+          </div>
+          <p class="hint">Rummy seats 2-6 players. If only one player has joined, starting the table fills the second seat with a computer player - tables of three or more start as-is.</p>
         </div>
         <div class="row">
           <button id="create-table-btn" type="button">Create Table</button>
@@ -329,6 +342,35 @@
           </p>
           <p class="hint">Mouse, touch, and keyboard are all supported. Press question mark for keyboard commands.</p>
         </div>
+
+        <div id="rummy-panel" class="hidden" tabindex="-1">
+          <div id="rummy-status" class="rummy-status" aria-label="Rummy game status">
+            <p id="rummy-status-hand"></p>
+            <p id="rummy-status-turn"></p>
+            <p id="rummy-status-pile"></p>
+            <p id="rummy-status-score"></p>
+          </div>
+
+          <div id="rummy-meld-board" class="rummy-meld-board" aria-label="Melds on the table"></div>
+
+          <div id="rummy-controls" class="rummy-controls">
+            <button id="rummy-draw-stock-btn" type="button">Draw Stock</button>
+            <button id="rummy-draw-discard-btn" type="button">Draw Discard</button>
+            <button id="rummy-meld-btn" type="button">Meld Marked Cards</button>
+            <button id="rummy-layoff-btn" type="button">Lay Off Marked Cards</button>
+            <button id="rummy-discard-btn" type="button">Discard Marked Card</button>
+          </div>
+
+          <div id="rummy-hand-area" class="rummy-section" aria-labelledby="rummy-hand-title">
+            <h3 id="rummy-hand-title">Your Hand</h3>
+            <div id="rummy-hand" class="rummy-hand" role="group" aria-label="Your hand - Space marks a card for melding or laying off, Enter discards it"></div>
+          </div>
+
+          <p id="rummy-help" class="visually-hidden">
+            Use the arrow keys to move between cards. Press Space to mark or unmark a card for melding or laying off, or Enter to discard the focused card and end your turn. Press M to meld the marked cards, L to lay them off onto a reviewed player's melds, D to draw from the stock, W to draw from the discard pile, and a number 1 through 6 to hear any seat's melds and set them as the lay-off target. Press question mark to open the keyboard commands dialog.
+          </p>
+          <p class="hint">Mouse, touch, and keyboard are all supported. Press question mark for keyboard commands.</p>
+        </div>
       </section>
     </main>
 
@@ -419,6 +461,27 @@
           <li>?: open this help</li>
           <li>Escape: close this help</li>
         </ul>
+        <ul id="help-content-rummy" class="hidden">
+          <li>Left/Right Arrow: move between cards in your hand</li>
+          <li>Up Arrow: jump to the lowest card of the next suit</li>
+          <li>Down Arrow: jump to the highest card of the previous suit</li>
+          <li>Home/End: jump to the first/last card</li>
+          <li>Space: mark or unmark the focused card for the next meld or lay-off</li>
+          <li>Enter: discard the focused card immediately, ending your turn (only once you have drawn this turn)</li>
+          <li>M: meld all marked cards as a new set or run (your turn, after drawing)</li>
+          <li>L: lay off all marked cards onto the meld target most recently reviewed with a 1-6 key press</li>
+          <li>1-6: announce seat N's melds and set seat N as the lay-off target for L (works any time, not just your turn - reviewing your own seat's melds is allowed too)</li>
+          <li>D: draw from the stock (your turn, before acting)</li>
+          <li>W: draw from the discard pile (your turn, before acting)</li>
+          <li>H: announce your full hand</li>
+          <li>T: announce hand number, phase, whose turn it is, and your own seat number</li>
+          <li>P: announce the discard pile's top card and how many cards remain in the stock</li>
+          <li>S: announce your score</li>
+          <li>Shift+S: announce every player's score</li>
+          <li>F: move focus back to the cards on the table</li>
+          <li>?: open this help</li>
+          <li>Escape: close this help</li>
+        </ul>
         <button id="close-help-btn" type="button">Close Help</button>
       </div>
     </div>
@@ -482,6 +545,7 @@
     <script src="games/hearts/hearts-client.js"></script>
     <script src="games/spades/spades-client.js"></script>
     <script src="games/cribbage/cribbage-client.js"></script>
+    <script src="games/rummy/rummy-client.js"></script>
     <!-- Game client modules share main.js's scope (see lumo-client.js's header
          comment); init() is called last, once every game module has finished
          registering its socket handlers. Kept as an external file (rather

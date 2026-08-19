@@ -16,7 +16,8 @@ const GAME_CATALOG = {
   uno: { type: 'uno', name: 'Lumo', playable: true, description: 'Join a live Lumo table.' },
   hearts: { type: 'hearts', name: 'Hearts', playable: true, description: 'Join a live Hearts table.' },
   spades: { type: 'spades', name: 'Spades', playable: true, description: 'Join a live Spades table.' },
-  cribbage: { type: 'cribbage', name: 'Cribbage', playable: true, description: 'Join a live Cribbage table.' }
+  cribbage: { type: 'cribbage', name: 'Cribbage', playable: true, description: 'Join a live Cribbage table.' },
+  rummy: { type: 'rummy', name: 'Rummy', playable: true, description: 'Join a live Rummy table.' }
 };
 
 
@@ -138,6 +139,10 @@ const el = {
   cribbagePanel: document.getElementById('cribbage-panel'),
   cribbageTableSettings: document.getElementById('cribbage-table-settings'),
   newTableCribbageTargetScore: document.getElementById('new-table-cribbage-target-score'),
+  selectRummyBtn: document.getElementById('select-rummy-btn'),
+  rummyPanel: document.getElementById('rummy-panel'),
+  rummyTableSettings: document.getElementById('rummy-table-settings'),
+  newTableRummyTargetScore: document.getElementById('new-table-rummy-target-score'),
   helpOverlay: document.getElementById('help-overlay'),
   closeHelpBtn: document.getElementById('close-help-btn'),
   announcementOverlay: document.getElementById('announcement-overlay'),
@@ -496,6 +501,9 @@ function bindUi() {
   bindPress(el.selectCribbageBtn, function () {
     selectGame('cribbage');
   });
+  bindPress(el.selectRummyBtn, function () {
+    selectGame('rummy');
+  });
   bindPress(el.closeHelpBtn, closeHelpOverlay);
   bindPress(el.closeAnnouncementBtn, function () {
     closeAnnouncementOverlay();
@@ -605,6 +613,8 @@ function focusActiveGameCards(options) {
     spadesFocusHand();
   } else if (gameType === 'cribbage' && typeof cribbageFocusHand === 'function') {
     cribbageFocusHand();
+  } else if (gameType === 'rummy' && typeof rummyFocusHand === 'function') {
+    rummyFocusHand();
   } else {
     focusBoardForA11y(options);
   }
@@ -852,6 +862,7 @@ function createTable() {
   const pointsToEndGame = parseInt(el.newTablePointsToEndGame && el.newTablePointsToEndGame.value, 10);
   const targetScore = parseInt(el.newTableTargetScore && el.newTableTargetScore.value, 10);
   const cribbageTargetScore = parseInt(el.newTableCribbageTargetScore && el.newTableCribbageTargetScore.value, 10);
+  const rummyTargetScore = parseInt(el.newTableRummyTargetScore && el.newTableRummyTargetScore.value, 10);
 
   socket.emit('createTable', {
     name: tableName,
@@ -865,7 +876,8 @@ function createTable() {
     computerSkill: el.newTableComputerSkill ? el.newTableComputerSkill.value : undefined,
     pointsToEndGame: Number.isFinite(pointsToEndGame) ? pointsToEndGame : undefined,
     targetScore: Number.isFinite(targetScore) ? targetScore : undefined,
-    cribbageTargetScore: Number.isFinite(cribbageTargetScore) ? cribbageTargetScore : undefined
+    cribbageTargetScore: Number.isFinite(cribbageTargetScore) ? cribbageTargetScore : undefined,
+    rummyTargetScore: Number.isFinite(rummyTargetScore) ? rummyTargetScore : undefined
   });
 }
 
@@ -1015,6 +1027,14 @@ function isCribbageContext() {
   return isCribbageTable() || appState.selectedGameType === 'cribbage';
 }
 
+function isRummyTable() {
+  return !!(appState.currentTable && appState.currentTable.gameType === 'rummy');
+}
+
+function isRummyContext() {
+  return isRummyTable() || appState.selectedGameType === 'rummy';
+}
+
 // Whichever game the player is currently looking at, table or no table -
 // either seated at a table (gameType is authoritative there) or still on the
 // shared create-table/lobby screen with a game selected. Falls back to 'uno'
@@ -1030,6 +1050,7 @@ const RULES_BY_GAME = {
   hearts: { file: 'hearts-rules.md', title: 'Hearts Rules', openedAnnouncement: 'Hearts rules opened' },
   spades: { file: 'spades-rules.md', title: 'Spades Rules', openedAnnouncement: 'Spades rules opened' },
   cribbage: { file: 'cribbage-rules.md', title: 'Cribbage Rules', openedAnnouncement: 'Cribbage rules opened' },
+  rummy: { file: 'rummy-rules.md', title: 'Rummy Rules', openedAnnouncement: 'Rummy rules opened' },
   uno: { file: 'lumo-rules.md', title: 'Lumo Rules', openedAnnouncement: 'Lumo rules opened' }
 };
 
@@ -1179,12 +1200,14 @@ function openHelpOverlay() {
   const lumoHelp = document.getElementById('help-content-lumo');
   const spadesHelp = document.getElementById('help-content-spades');
   const cribbageHelp = document.getElementById('help-content-cribbage');
+  const rummyHelp = document.getElementById('help-content-rummy');
   const activeGameType = getActiveGameType();
-  if (heartsHelp && lumoHelp && spadesHelp && cribbageHelp) {
+  if (heartsHelp && lumoHelp && spadesHelp && cribbageHelp && rummyHelp) {
     heartsHelp.classList.toggle('hidden', activeGameType !== 'hearts');
     spadesHelp.classList.toggle('hidden', activeGameType !== 'spades');
     cribbageHelp.classList.toggle('hidden', activeGameType !== 'cribbage');
-    lumoHelp.classList.toggle('hidden', activeGameType === 'hearts' || activeGameType === 'spades' || activeGameType === 'cribbage');
+    rummyHelp.classList.toggle('hidden', activeGameType !== 'rummy');
+    lumoHelp.classList.toggle('hidden', activeGameType === 'hearts' || activeGameType === 'spades' || activeGameType === 'cribbage' || activeGameType === 'rummy');
   }
   el.helpOverlay.classList.remove('hidden');
   el.closeHelpBtn.focus();
@@ -1199,7 +1222,9 @@ function closeHelpOverlay() {
     el.spadesPanel.focus();
   } else if (appState.currentTable && appState.gameStatus === 'in_game' && isCribbageTable() && el.cribbagePanel) {
     el.cribbagePanel.focus();
-  } else if (appState.currentTable && appState.gameStatus === 'in_game' && !isHeartsTable() && !isSpadesTable() && !isCribbageTable()) {
+  } else if (appState.currentTable && appState.gameStatus === 'in_game' && isRummyTable() && el.rummyPanel) {
+    el.rummyPanel.focus();
+  } else if (appState.currentTable && appState.gameStatus === 'in_game' && !isHeartsTable() && !isSpadesTable() && !isCribbageTable() && !isRummyTable()) {
     focusBoardForA11y({
       announceOnFocus: true
     });
@@ -1283,6 +1308,10 @@ function closeAnnouncementOverlay(restoreFocus) {
     socket.emit('cribbageAckHandSummary');
   }
 
+  if (wasOpen && kind === 'rummyHandSummary') {
+    socket.emit('rummyAckHandSummary');
+  }
+
   if (restoreFocus === false) {
     return;
   }
@@ -1293,7 +1322,9 @@ function closeAnnouncementOverlay(restoreFocus) {
     el.spadesPanel.focus();
   } else if (appState.currentTable && appState.gameStatus === 'in_game' && isCribbageTable() && el.cribbagePanel) {
     el.cribbagePanel.focus();
-  } else if (appState.currentTable && appState.gameStatus === 'in_game' && !isHeartsTable() && !isSpadesTable() && !isCribbageTable()) {
+  } else if (appState.currentTable && appState.gameStatus === 'in_game' && isRummyTable() && el.rummyPanel) {
+    el.rummyPanel.focus();
+  } else if (appState.currentTable && appState.gameStatus === 'in_game' && !isHeartsTable() && !isSpadesTable() && !isCribbageTable() && !isRummyTable()) {
     focusBoardForA11y({
       announceOnFocus: true
     });
@@ -1320,7 +1351,7 @@ function render() {
   if (el.gamePickerSummary) {
     el.gamePickerSummary.textContent = appState.selectedGameType
       ? 'Selected game: ' + (getGameDefinition(appState.selectedGameType) || { name: 'Lumo' }).name
-      : 'Pick a card game to continue. Lumo, Hearts, Spades, and Cribbage are all available now.';
+      : 'Pick a card game to continue. Lumo, Hearts, Spades, Cribbage, and Rummy are all available now.';
   }
 
   if (el.gamePickerStats) {
@@ -1333,9 +1364,10 @@ function render() {
   const isHearts = activeGameType === 'hearts';
   const isSpades = activeGameType === 'spades';
   const isCribbage = activeGameType === 'cribbage';
+  const isRummy = activeGameType === 'rummy';
   const activeRulesName = RULES_BY_GAME[activeGameType] ? RULES_BY_GAME[activeGameType].title.replace(/ Rules$/, '') : 'Lumo';
   if (el.lumoTableSettings) {
-    el.lumoTableSettings.classList.toggle('hidden', isHearts || isSpades || isCribbage);
+    el.lumoTableSettings.classList.toggle('hidden', isHearts || isSpades || isCribbage || isRummy);
   }
   if (el.heartsTableSettings) {
     el.heartsTableSettings.classList.toggle('hidden', !isHearts);
@@ -1345,6 +1377,9 @@ function render() {
   }
   if (el.cribbageTableSettings) {
     el.cribbageTableSettings.classList.toggle('hidden', !isCribbage);
+  }
+  if (el.rummyTableSettings) {
+    el.rummyTableSettings.classList.toggle('hidden', !isRummy);
   }
   if (el.openRulesBtn) {
     el.openRulesBtn.textContent = 'Read ' + activeRulesName + ' Rules';
@@ -1361,6 +1396,9 @@ function render() {
       if (el.cribbagePanel) {
         el.cribbagePanel.classList.add('hidden');
       }
+      if (el.rummyPanel) {
+        el.rummyPanel.classList.add('hidden');
+      }
       if (el.heartsPanel) {
         el.heartsPanel.classList.toggle('hidden', appState.gameStatus !== 'in_game');
       }
@@ -1373,6 +1411,9 @@ function render() {
       }
       if (el.cribbagePanel) {
         el.cribbagePanel.classList.add('hidden');
+      }
+      if (el.rummyPanel) {
+        el.rummyPanel.classList.add('hidden');
       }
       if (el.spadesPanel) {
         el.spadesPanel.classList.toggle('hidden', appState.gameStatus !== 'in_game');
@@ -1387,8 +1428,27 @@ function render() {
       if (el.spadesPanel) {
         el.spadesPanel.classList.add('hidden');
       }
+      if (el.rummyPanel) {
+        el.rummyPanel.classList.add('hidden');
+      }
       if (el.cribbagePanel) {
         el.cribbagePanel.classList.toggle('hidden', appState.gameStatus !== 'in_game');
+      }
+    } else if (isRummy) {
+      if (el.gamePanel) {
+        el.gamePanel.classList.add('hidden');
+      }
+      if (el.heartsPanel) {
+        el.heartsPanel.classList.add('hidden');
+      }
+      if (el.spadesPanel) {
+        el.spadesPanel.classList.add('hidden');
+      }
+      if (el.cribbagePanel) {
+        el.cribbagePanel.classList.add('hidden');
+      }
+      if (el.rummyPanel) {
+        el.rummyPanel.classList.toggle('hidden', appState.gameStatus !== 'in_game');
       }
     } else {
       if (el.heartsPanel) {
@@ -1399,6 +1459,9 @@ function render() {
       }
       if (el.cribbagePanel) {
         el.cribbagePanel.classList.add('hidden');
+      }
+      if (el.rummyPanel) {
+        el.rummyPanel.classList.add('hidden');
       }
       el.gamePanel.classList.toggle('hidden', appState.gameStatus !== 'in_game');
     }
@@ -1422,6 +1485,11 @@ function render() {
           ? ' | Hand ' + appState.currentTable.cribbage.handNumber
           : '';
         el.tableMatchSettings.textContent = 'Target score: ' + (matchSettings.targetScore || 121) + handText;
+      } else if (isRummy) {
+        const handText = appState.gameStatus === 'in_game' && appState.currentTable.rummy
+          ? ' | Hand ' + appState.currentTable.rummy.handNumber
+          : '';
+        el.tableMatchSettings.textContent = 'Target score: ' + (matchSettings.targetScore || 500) + handText;
       } else {
         const roundText = appState.gameStatus === 'in_game' && typeof appState.currentTable.roundNumber === 'number'
           ? ' | This is round ' + appState.currentTable.roundNumber + ' of ' + matchSettings.maxRounds
@@ -1438,10 +1506,12 @@ function render() {
       }
     }
 
-    if (isHearts || isSpades || isCribbage) {
+    if (isHearts || isSpades || isCribbage || isRummy) {
       // Hearts, Spades, and Cribbage all always fill to their fixed seat
       // count with computer players when the host starts, so there is no
-      // minimum-player gate to enforce here.
+      // minimum-player gate to enforce here. Rummy is variable (2-6 seats),
+      // but its own startGame() only ever needs to pad a lone human up to
+      // two, so starting is likewise never blocked on player count.
       el.startGameBtn.disabled = !appState.isHost || appState.gameStatus === 'in_game';
     } else {
       const computerPlayerCount = (appState.currentTable.matchSettings && appState.currentTable.matchSettings.computerPlayers) || 0;
@@ -1453,7 +1523,13 @@ function render() {
       // creating the table, so there's nothing implicit to warn about there -
       // this note is only needed for the fixed-seat-count games, and only
       // while still waiting to start (once in_game the seats are settled).
-      if (appState.gameStatus !== 'in_game' && (isHearts || isSpades || isCribbage)) {
+      if (appState.gameStatus !== 'in_game' && isRummy) {
+        // Rummy's player count is variable (2-6) - a bot is only ever added
+        // to top up a lone human to two, so the hint only applies then.
+        el.tableStartHint.textContent = appState.currentTable.players.length === 1
+          ? 'This game needs at least two players. Starting now will add one computer player.'
+          : '';
+      } else if (appState.gameStatus !== 'in_game' && (isHearts || isSpades || isCribbage)) {
         const neededSeats = isCribbage ? 2 : 4;
         const currentPlayers = appState.currentTable.players.length;
         el.tableStartHint.textContent = currentPlayers < neededSeats
@@ -1471,7 +1547,7 @@ function render() {
       el.kickPlayerBtn.disabled = !hasOtherPlayers;
     }
     setTableStatus(appState.tableStatusMessage, appState.tableStatusTone);
-    if (!isHearts && !isSpades && !isCribbage) {
+    if (!isHearts && !isSpades && !isCribbage && !isRummy) {
       setPlayDirectionIndicator();
     } else if (el.playDirection) {
       el.playDirection.textContent = '';
@@ -1495,6 +1571,9 @@ function render() {
   }
   if (typeof renderCribbagePanel === 'function') {
     renderCribbagePanel();
+  }
+  if (typeof renderRummyPanel === 'function') {
+    renderRummyPanel();
   }
 }
 
@@ -1541,11 +1620,13 @@ function renderPlayerSummary() {
   const isHearts = appState.currentTable.gameType === 'hearts';
   const isSpades = appState.currentTable.gameType === 'spades';
   const isCribbage = appState.currentTable.gameType === 'cribbage';
+  const isRummy = appState.currentTable.gameType === 'rummy';
   const heartsTurnPlayerId = isHearts && appState.currentTable.hearts ? appState.currentTable.hearts.turnPlayerId : null;
   const spadesTurnPlayerId = isSpades && appState.currentTable.spades ? appState.currentTable.spades.turnPlayerId : null;
   const cribbageTurnPlayerId = isCribbage && appState.currentTable.cribbage && appState.currentTable.cribbage.peg
     ? appState.currentTable.cribbage.peg.turnPlayerId
     : null;
+  const rummyTurnPlayerId = isRummy && appState.currentTable.rummy ? appState.currentTable.rummy.turnPlayerId : null;
   // Every seat on a Spades team holds the same card count (13 minus tricks
   // played), so per-seat "Cards: N" is uninformative there - show each
   // team's combined tricks taken instead (see .spades-team-a/-b below).
@@ -1561,8 +1642,8 @@ function renderPlayerSummary() {
     const unoBadge = document.createElement('span');
     const details = document.createElement('span');
     const isCurrentTurn = appState.gameStatus === 'in_game'
-      && (player.id === appState.currentTurnPlayerId || player.id === heartsTurnPlayerId || player.id === spadesTurnPlayerId || player.id === cribbageTurnPlayerId);
-    const hasUno = !isHearts && !isSpades && !isCribbage && appState.gameStatus === 'in_game' && player.cardCount === 1;
+      && (player.id === appState.currentTurnPlayerId || player.id === heartsTurnPlayerId || player.id === spadesTurnPlayerId || player.id === cribbageTurnPlayerId || player.id === rummyTurnPlayerId);
+    const hasUno = !isHearts && !isSpades && !isCribbage && !isRummy && appState.gameStatus === 'in_game' && player.cardCount === 1;
     const tags = [];
     const totalPoints = typeof player.score === 'number' ? player.score : 0;
 
@@ -1870,9 +1951,9 @@ socket.on('tableState', function (payload) {
     if (!appState.tableStatusMessage || appState.tableStatusTone !== 'success') {
       setTableStatus('Waiting for the host to start the next game.', 'info');
     }
-  } else if (!appState.currentTurnPlayerId && !isHeartsTable() && !isSpadesTable() && !isCribbageTable()) {
+  } else if (!appState.currentTurnPlayerId && !isHeartsTable() && !isSpadesTable() && !isCribbageTable() && !isRummyTable()) {
     // currentTurnPlayerId/appState.turn are Lumo-only fields (set from
-    // lumo-client.js) - Hearts, Spades, and Cribbage all track turn state
+    // lumo-client.js) - Hearts, Spades, Cribbage, and Rummy all track turn state
     // separately (appState.heartsTurnPlayerId / appState.spadesTurnPlayerId /
     // appState.cribbageTurnPlayerId) and announce it themselves (see
     // heartsTurnState/spadesTurnState/cribbagePegState in their respective
@@ -1896,8 +1977,8 @@ socket.on('tableState', function (payload) {
 
   if (enteredInGame) {
     clearPlayHistory();
-    if (isHeartsTable() || isSpadesTable() || isCribbageTable()) {
-      // Hearts, Spades, and Cribbage all manage their own focus once the
+    if (isHeartsTable() || isSpadesTable() || isCribbageTable() || isRummyTable()) {
+      // Hearts, Spades, Cribbage, and Rummy all manage their own focus once the
       // hand/bidding/discard UI actually renders (see heartsPassPrompt/
       // heartsHand in hearts-client.js, spadesBidState/spadesTurnState in
       // spades-client.js, and cribbageHand in cribbage-client.js) -

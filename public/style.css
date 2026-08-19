@@ -1256,3 +1256,173 @@ canvas {
   stroke-width: 2.5;
   filter: drop-shadow(0 0 3px rgba(0, 0, 0, 0.6));
 }
+
+/* Rummy panel - mirrors the .hearts-*/.spades-*/.cribbage-* rule sets above
+   (same fully game-namespaced, self-contained structure), plus an
+   always-visible meld board with no direct precedent elsewhere in the
+   codebase - closest visual analog is the Cribbage board/card-list styling
+   above, which this borrows its spacing/labeling conventions from. */
+
+#rummy-panel {
+  margin-top: 10px;
+  padding: 10px;
+  border-radius: 10px;
+  background: #10ac84;
+}
+
+#rummy-panel:focus {
+  outline: 2px solid #f8fff6;
+  outline-offset: 2px;
+}
+
+.rummy-status {
+  margin: 0 0 12px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: #ecf6f4;
+  border: 1px solid #b7d2cc;
+}
+
+.rummy-status p {
+  margin: 4px 0;
+  color: #1d4342;
+  font-weight: 600;
+}
+
+.rummy-status p:empty {
+  display: none;
+}
+
+.rummy-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.rummy-controls button {
+  background: #fff;
+  color: #123b39;
+  border: 2px solid #a7bdb7;
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-weight: 700;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.rummy-controls button:focus-visible {
+  outline: 3px solid #0d7c67;
+  outline-offset: 1px;
+}
+
+.rummy-controls button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.rummy-meld-board {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.rummy-meld-seat {
+  flex: 1 1 220px;
+  min-width: 200px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: #ecf6f4;
+  border: 1px solid #b7d2cc;
+}
+
+.rummy-meld-seat.rummy-layoff-target {
+  border-color: #0d7c67;
+  box-shadow: 0 0 0 3px rgba(13, 124, 103, 0.3);
+}
+
+.rummy-meld-seat h4 {
+  margin: 0 0 8px;
+  color: #123b39;
+}
+
+.rummy-meld-seat button {
+  background: #fff;
+  color: #123b39;
+  border: 2px solid #a7bdb7;
+  border-radius: 8px;
+  padding: 4px 10px;
+  font-size: 13px;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.rummy-meld-seat button:focus-visible {
+  outline: 3px solid #0d7c67;
+  outline-offset: 1px;
+}
+
+.rummy-meld-group-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+}
+
+.rummy-meld-group-list li {
+  margin: 4px 0;
+  font-size: 13px;
+  color: #234544;
+}
+
+.rummy-meld-group {
+  font-weight: 700;
+}
+
+.rummy-section {
+  margin-bottom: 14px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: #ecf6f4;
+  border: 1px solid #b7d2cc;
+}
+
+.rummy-section h3 {
+  margin: 0 0 8px;
+  color: #123b39;
+}
+
+.rummy-hand {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.rummy-hand button {
+  background: #fff;
+  border: 2px solid #a7bdb7;
+  border-radius: 8px;
+  padding: 2px;
+  cursor: pointer;
+  touch-action: manipulation;
+  flex: 1 1 0;
+  min-width: 46px;
+  max-width: 120px;
+}
+
+.rummy-hand button img {
+  width: 100%;
+  height: auto;
+  display: block;
+  pointer-events: none;
+}
+
+.rummy-hand button:focus-visible {
+  outline: 3px solid #0d7c67;
+  outline-offset: 1px;
+}
+
+.rummy-hand button.selected {
+  border-color: #0d7c67;
+  box-shadow: 0 0 0 3px rgba(13, 124, 103, 0.3);
+}
