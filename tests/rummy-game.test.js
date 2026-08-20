@@ -258,6 +258,70 @@ test('a full draw -> meld -> lay-off -> discard turn cycle works over the socket
   }
 });
 
+test('a Joker melds as a wild card and, left in hand, scores as 15 deadwood', async () => {
+  const port = 3204;
+  const child = startChild(port);
+  let host;
+
+  try {
+    await waitForServer(child, port);
+    host = await connectAndRegister(port, `rummy-joker-${Date.now()}@example.com`, `RummyJoker${Date.now()}`);
+
+    await createRummyTable(host.socket);
+
+    const inGamePromise = waitForEvent(host.socket, 'tableState', (payload) => payload && payload.table && payload.table.status === 'in_game', 5000);
+    host.socket.emit('startGame');
+    const inGameTable = (await inGamePromise).table;
+
+    const hostIndex = inGameTable.players.findIndex((player) => player.id === host.socket.id);
+    const botIndex = 1 - hostIndex;
+
+    const hands = [[], []];
+    hands[hostIndex] = ['7C', '7D', '1J', '8S'];
+    hands[botIndex] = ['KC', '1J'];
+
+    const readyPromise = waitForEvent(host.socket, 'rummyTurnState', (payload) => payload.turnPlayerId === host.socket.id, 5000);
+    host.socket.emit('__testSetTableState', {
+      tableId: inGameTable.id,
+      game: {
+        phase: 'playing',
+        turnIndex: hostIndex,
+        turnPhase: 'action',
+        dealerIndex: botIndex,
+        hands: hands,
+        stock: ['5D', '6D'],
+        discardPile: ['9H'],
+        melds: [[], []]
+      },
+      emitRummyTurnState: true
+    });
+    await readyPromise;
+
+    // 7C + 7D + a Joker is a valid set - the Joker wildcards the missing suit.
+    const meldPromise = waitForEvent(host.socket, 'rummyMeldResult', () => true, 5000);
+    host.socket.emit('rummyMeldCards', { cards: ['7C', '7D', '1J'] });
+    const meldResult = await meldPromise;
+    assert.equal(meldResult.success, true);
+
+    // Discarding the last card (8S) empties the host's hand and goes out,
+    // ending the hand immediately - the bot is left holding KC + a lone
+    // Joker, which should score as 10 + 15 = 25 deadwood.
+    const summaryPromise = waitForEvent(host.socket, 'rummyHandSummary', () => true, 5000);
+    host.socket.emit('rummyDiscardCard', { card: '8S' });
+    const summary = await summaryPromise;
+
+    const botRow = summary.rows.find((row) => row.name !== host.payload.name);
+    assert.equal(botRow.deadwood, 25, 'KC (10) + Joker (15) deadwood');
+    const hostRow = summary.rows.find((row) => row.name === host.payload.name);
+    assert.equal(hostRow.pointsAwarded, 25);
+  } finally {
+    if (host && host.socket.connected) {
+      host.socket.disconnect();
+    }
+    child.kill('SIGTERM');
+  }
+});
+
 test('going out scores the hand and gates the next hand on pendingHandAcks, which a bot never blocks', async () => {
   const port = 3202;
   const child = startChild(port);

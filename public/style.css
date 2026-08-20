@@ -1321,6 +1321,53 @@ canvas {
   cursor: not-allowed;
 }
 
+.rummy-pile-area {
+  display: flex;
+  align-items: flex-end;
+  gap: 18px;
+  margin-bottom: 14px;
+}
+
+.rummy-pile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  position: relative;
+}
+
+.rummy-pile-img {
+  width: 70px;
+  height: auto;
+  border-radius: 6px;
+  border: 2px solid #a7bdb7;
+  background: #fff;
+}
+
+.rummy-pile-img.rummy-pile-empty {
+  visibility: hidden;
+}
+
+.rummy-pile-count {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  min-width: 20px;
+  padding: 1px 5px;
+  border-radius: 10px;
+  background: #123b39;
+  color: #f8fff6;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-align: center;
+}
+
+.rummy-pile-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #1d4342;
+}
+
 .rummy-meld-board {
   display: flex;
   flex-wrap: wrap;

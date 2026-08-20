@@ -21,6 +21,15 @@
 //     Rummy) - any valid set/run may be melded the moment a player holds one.
 //   - Laying off is allowed onto ANY player's existing melds, including your
 //     own, not just melds you personally laid down.
+//   - The deck includes 2 Jokers (standard basic-Rummy practice, per
+//     pagat.com), which are wild: a Joker may stand in for any card in a set
+//     or run, in place of a real card of that suit/rank. A meld still needs
+//     at least one real card to anchor its rank (set) or suit (run) - a
+//     group made entirely of Jokers is not allowed, since there would be
+//     nothing to declare its identity. A Joker left in a player's hand when
+//     a hand ends counts as JOKER_DEADWOOD_VALUE (15) deadwood - higher than
+//     any real card - since it is the most valuable card to be caught
+//     holding.
 
 const RANKS = ['2', '3', '4', '5', '6', '7', '8', '9', 'T', 'J', 'Q', 'K', 'A'];
 const SUITS = ['C', 'D', 'H', 'S'];
@@ -29,6 +38,20 @@ const RANK_NAMES = {
   '8': 'Eight', '9': 'Nine', T: 'Ten', J: 'Jack', Q: 'Queen', K: 'King', A: 'Ace'
 };
 const SUIT_NAMES = { C: 'Clubs', D: 'Diamonds', H: 'Hearts', S: 'Spades' };
+
+// Jokers use suit char 'J' (never used by a real suit - see SUITS above),
+// which doubles as a cheap, unambiguous discriminator (isJoker()) without
+// needing a separate "is this a joker" flag threaded through every card
+// value. Rank chars '1'/'2' just distinguish the two physical Jokers; they
+// carry no meaning otherwise (a Joker's effective rank/suit is whatever a
+// meld needs it to be).
+const JOKER_CARDS = ['1J', '2J'];
+const JOKER_SUIT_CHAR = 'J';
+const JOKER_DEADWOOD_VALUE = 15;
+
+function isJoker(card) {
+  return typeof card === 'string' && card.charAt(1) === JOKER_SUIT_CHAR;
+}
 
 // Deadwood/scoring value: ace is always 1 (never 11/high), face cards are all
 // 10, everything else is its pip value.
@@ -55,6 +78,9 @@ function createDeck() {
       deck.push(rank + suit);
     });
   });
+  JOKER_CARDS.forEach(function (card) {
+    deck.push(card);
+  });
   return deck;
 }
 
@@ -67,9 +93,15 @@ function suitOf(card) {
 }
 
 function cardValue(card) {
+  if (isJoker(card)) {
+    return JOKER_DEADWOOD_VALUE;
+  }
   return CARD_VALUES[rankOf(card)] || 0;
 }
 
+// Ace-low rank position (see header) - meaningless for a Joker (it has no
+// fixed rank), so callers must only invoke this on a real card. Every place
+// in this file that might see a Joker filters it out first.
 function rankOrderValue(card) {
   return RANK_ORDER_VALUES[rankOf(card)] || 0;
 }
@@ -79,6 +111,9 @@ function suitName(suit) {
 }
 
 function cardName(card) {
+  if (isJoker(card)) {
+    return 'Joker';
+  }
   const rank = RANK_NAMES[rankOf(card)];
   const suit = SUIT_NAMES[suitOf(card)];
   if (!rank || !suit) {
@@ -88,14 +123,27 @@ function cardName(card) {
 }
 
 const SUIT_SORT_ORDER = { C: 0, D: 1, H: 2, S: 3 };
+// Sorted after Spades/King respectively, so Jokers land at the end of a
+// freshly dealt hand rather than colliding with the "unknown suit/rank"
+// fallback of 0 (which would otherwise sort them before the Ace).
+const JOKER_SORT_SUIT_VALUE = 4;
+const JOKER_SORT_RANK_VALUE = 14;
+
+function sortSuitValue(card) {
+  return isJoker(card) ? JOKER_SORT_SUIT_VALUE : SUIT_SORT_ORDER[suitOf(card)];
+}
+
+function sortRankValue(card) {
+  return isJoker(card) ? JOKER_SORT_RANK_VALUE : rankOrderValue(card);
+}
 
 function sortHand(hand) {
   return hand.slice().sort(function (a, b) {
-    const suitDiff = SUIT_SORT_ORDER[suitOf(a)] - SUIT_SORT_ORDER[suitOf(b)];
+    const suitDiff = sortSuitValue(a) - sortSuitValue(b);
     if (suitDiff !== 0) {
       return suitDiff;
     }
-    return rankOrderValue(a) - rankOrderValue(b);
+    return sortRankValue(a) - sortRankValue(b);
   });
 }
 
@@ -105,18 +153,20 @@ function dealSizeForPlayerCount(playerCount) {
   return playerCount === 2 ? 10 : 7;
 }
 
-// deck must already be a shuffled array of the 52 unique cards from
-// createDeck() - randomness is intentionally kept out of this pure module
-// (see games/rummy/index.js, which shuffles via the shared deps.shuffle
-// before calling this). Deals dealSizeForPlayerCount(playerCount) cards
-// round-robin per player, then one further card face-up to start the
-// discard pile; everything left over becomes the stock. Returns
-// { hands, stock, discard } - discard is an array whose LAST element is the
-// visible top card (same "top = last element" convention as
-// games/lumo/index.js's discard pile).
+// deck must already be a shuffled array of the DECK_SIZE (54, including the
+// 2 Jokers) unique cards from createDeck() - randomness is intentionally
+// kept out of this pure module (see games/rummy/index.js, which shuffles
+// via the shared deps.shuffle before calling this). Deals
+// dealSizeForPlayerCount(playerCount) cards round-robin per player, then one
+// further card face-up to start the discard pile; everything left over
+// becomes the stock. Returns { hands, stock, discard } - discard is an
+// array whose LAST element is the visible top card (same "top = last
+// element" convention as games/lumo/index.js's discard pile).
+const DECK_SIZE = SUITS.length * RANKS.length + JOKER_CARDS.length;
+
 function deal(shuffledDeck, playerCount) {
-  if (!Array.isArray(shuffledDeck) || shuffledDeck.length !== 52) {
-    throw new Error('deal() requires a shuffled 52-card deck');
+  if (!Array.isArray(shuffledDeck) || shuffledDeck.length !== DECK_SIZE) {
+    throw new Error('deal() requires a shuffled ' + DECK_SIZE + '-card deck');
   }
   if (!Number.isInteger(playerCount) || playerCount < 2 || playerCount > 6) {
     throw new Error('deal() requires a player count between 2 and 6');
@@ -148,14 +198,21 @@ function deal(shuffledDeck, playerCount) {
 
 // 3 or 4 cards, all the same rank, all different suits (a standard deck can
 // never produce a same-rank duplicate-suit hand, but a defensive check costs
-// nothing).
+// nothing). Any Jokers in the group are wild and simply fill out the
+// remaining suit slots - the size cap (MAX_SET_SIZE) already guarantees
+// there's room for them, so no separate Joker-count check is needed. At
+// least one real card is required to anchor the set's rank (see header).
 function isValidSet(cards) {
   if (!Array.isArray(cards) || cards.length < MIN_SET_SIZE || cards.length > MAX_SET_SIZE) {
     return false;
   }
-  const rank = rankOf(cards[0]);
+  const nonJokers = cards.filter(function (card) { return !isJoker(card); });
+  if (!nonJokers.length) {
+    return false;
+  }
+  const rank = rankOf(nonJokers[0]);
   const seenSuits = new Set();
-  return cards.every(function (card) {
+  return nonJokers.every(function (card) {
     if (rankOf(card) !== rank) {
       return false;
     }
@@ -168,23 +225,75 @@ function isValidSet(cards) {
   });
 }
 
-// 3+ cards, all the same suit, consecutive ranks (ace low only - see header).
+// 3+ cards, all the same suit, consecutive ranks (ace low only - see
+// header). Jokers are wild: they fill gaps between the real cards' ranks,
+// and any left over extend the span at either end, as long as there's room
+// within the ace-low 1-13 bound (no wraparound). At least one real card is
+// required to anchor the run's suit (see header).
 function isValidRun(cards) {
   if (!Array.isArray(cards) || cards.length < MIN_RUN_SIZE) {
     return false;
   }
-  const suit = suitOf(cards[0]);
-  if (!cards.every(function (card) { return suitOf(card) === suit; })) {
+  const nonJokers = cards.filter(function (card) { return !isJoker(card); });
+  const jokerCount = cards.length - nonJokers.length;
+  if (!nonJokers.length) {
+    return false;
+  }
+  const suit = suitOf(nonJokers[0]);
+  if (!nonJokers.every(function (card) { return suitOf(card) === suit; })) {
     return false;
   }
 
-  const values = cards.map(rankOrderValue).sort(function (a, b) { return a - b; });
+  const values = nonJokers.map(rankOrderValue).sort(function (a, b) { return a - b; });
   for (let i = 1; i < values.length; i++) {
-    if (values[i] !== values[i - 1] + 1) {
+    if (values[i] === values[i - 1]) {
       return false;
     }
   }
-  return true;
+
+  const min = values[0];
+  const max = values[values.length - 1];
+  const internalGapsNeeded = (max - min + 1) - values.length;
+  if (internalGapsNeeded > jokerCount) {
+    return false;
+  }
+  const leftoverJokers = jokerCount - internalGapsNeeded;
+  const roomBelow = min - 1;
+  const roomAbove = 13 - max;
+  return leftoverJokers <= roomBelow + roomAbove;
+}
+
+// The contiguous rank-order span a run group currently covers, accounting
+// for Jokers used as gap-fillers/extensions - not stored explicitly on the
+// group (see the header comment), so it's recomputed from the group's cards
+// each time canExtendMeld() needs it. Any leftover (non-gap-filling) Jokers
+// are deterministically assigned to extend the low end first, then the high
+// end - their exact position is genuinely ambiguous in real Rummy (a Joker's
+// identity isn't fixed until a real card replaces it), so this is just a
+// consistent, defensible choice, not "the" correct one. Returns null if the
+// group has no real card to anchor it (shouldn't happen for an
+// already-valid run).
+function runEffectiveBounds(cards) {
+  const jokers = cards.filter(isJoker);
+  const nonJokers = cards.filter(function (card) { return !isJoker(card); });
+  if (!nonJokers.length) {
+    return null;
+  }
+  const values = nonJokers.map(rankOrderValue).sort(function (a, b) { return a - b; });
+  let min = values[0];
+  let max = values[values.length - 1];
+  let leftover = jokers.length - ((max - min + 1) - values.length);
+  while (leftover > 0) {
+    if (min > 1) {
+      min--;
+    } else if (max < 13) {
+      max++;
+    } else {
+      break;
+    }
+    leftover--;
+  }
+  return { min: min, max: max };
 }
 
 function classifyMeld(cards) {
@@ -199,6 +308,9 @@ function classifyMeld(cards) {
 
 // meldGroup: { type: 'set'|'run', cards: [...] } - an existing melded group
 // already on the table. Returns true if `card` could legally be added to it.
+// `card` itself may be a Joker (wild) or a real card extending a group that
+// already contains a Joker (or both) - see isValidSet()/isValidRun() above
+// for how Jokers factor into a group's rank/suit identity.
 function canExtendMeld(meldGroup, card) {
   if (!meldGroup || !Array.isArray(meldGroup.cards) || !meldGroup.cards.length) {
     return false;
@@ -208,24 +320,38 @@ function canExtendMeld(meldGroup, card) {
     if (meldGroup.cards.length >= MAX_SET_SIZE) {
       return false;
     }
-    const rank = rankOf(meldGroup.cards[0]);
+    if (isJoker(card)) {
+      // A Joker fills whatever suit slot is left - there's always one
+      // available since the group isn't at MAX_SET_SIZE yet.
+      return true;
+    }
+    const nonJokers = meldGroup.cards.filter(function (c) { return !isJoker(c); });
+    if (!nonJokers.length) {
+      return false;
+    }
+    const rank = rankOf(nonJokers[0]);
     if (rankOf(card) !== rank) {
       return false;
     }
     const suit = suitOf(card);
-    return !meldGroup.cards.some(function (c) { return suitOf(c) === suit; });
+    return !nonJokers.some(function (c) { return suitOf(c) === suit; });
   }
 
   if (meldGroup.type === 'run') {
-    const suit = suitOf(meldGroup.cards[0]);
+    const bounds = runEffectiveBounds(meldGroup.cards);
+    if (!bounds) {
+      return false;
+    }
+    if (isJoker(card)) {
+      return bounds.min > 1 || bounds.max < 13;
+    }
+    const nonJokers = meldGroup.cards.filter(function (c) { return !isJoker(c); });
+    const suit = suitOf(nonJokers[0]);
     if (suitOf(card) !== suit) {
       return false;
     }
-    const values = meldGroup.cards.map(rankOrderValue);
-    const minValue = Math.min.apply(null, values);
-    const maxValue = Math.max.apply(null, values);
     const cardValueOrder = rankOrderValue(card);
-    return cardValueOrder === minValue - 1 || cardValueOrder === maxValue + 1;
+    return cardValueOrder === bounds.min - 1 || cardValueOrder === bounds.max + 1;
   }
 
   return false;
@@ -291,6 +417,9 @@ function getWinnerIndex(scores) {
 module.exports = {
   RANKS: RANKS,
   SUITS: SUITS,
+  JOKER_CARDS: JOKER_CARDS,
+  JOKER_DEADWOOD_VALUE: JOKER_DEADWOOD_VALUE,
+  isJoker: isJoker,
   createDeck: createDeck,
   rankOf: rankOf,
   suitOf: suitOf,

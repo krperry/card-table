@@ -347,8 +347,20 @@
           <div id="rummy-status" class="rummy-status" aria-label="Rummy game status">
             <p id="rummy-status-hand"></p>
             <p id="rummy-status-turn"></p>
-            <p id="rummy-status-pile"></p>
+            <p id="rummy-status-pile" class="visually-hidden"></p>
             <p id="rummy-status-score"></p>
+          </div>
+
+          <div id="rummy-pile-area" class="rummy-pile-area hidden" aria-hidden="true">
+            <div class="rummy-pile">
+              <img id="rummy-stock-pile-img" class="rummy-pile-img" src="images/playing-cards/2B.svg" alt="">
+              <span id="rummy-stock-pile-count" class="rummy-pile-count"></span>
+              <span class="rummy-pile-label">Stock</span>
+            </div>
+            <div class="rummy-pile">
+              <img id="rummy-discard-pile-img" class="rummy-pile-img rummy-pile-empty" alt="">
+              <span class="rummy-pile-label">Discard</span>
+            </div>
           </div>
 
           <div id="rummy-meld-board" class="rummy-meld-board" aria-label="Melds on the table"></div>
@@ -468,8 +480,7 @@
         </ul>
         <ul id="help-content-rummy" class="hidden">
           <li>Left/Right Arrow: move between cards in your hand</li>
-          <li>Up Arrow: jump to the lowest card of the next suit</li>
-          <li>Down Arrow: jump to the highest card of the previous suit</li>
+          <li>Up/Down Arrow: jump to the next or previous group of cards - grouped by suit when sorted by suit, or by card value when sorted by value</li>
           <li>Home/End: jump to the first/last card</li>
           <li>Space: mark or unmark the focused card for the next meld or lay-off</li>
           <li>Enter: discard the focused card immediately, ending your turn (only once you have drawn this turn; refused while any cards are marked - unselect them first)</li>
@@ -481,7 +492,7 @@
           <li>Sort cards by (button, above your hand), or G: switch your hand between sorting by card value and by suit</li>
           <li>H: announce your full hand</li>
           <li>T: announce hand number, phase, whose turn it is, and your own seat number</li>
-          <li>P: announce the discard pile's top card and how many cards remain in the stock</li>
+          <li>P: announce the discard pile's top card</li>
           <li>S: announce your score</li>
           <li>Shift+S: announce every player's score</li>
           <li>F: move focus back to the cards on the table</li>

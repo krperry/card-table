@@ -132,7 +132,11 @@ function chooseMeldsAndLayoffs(hand, allMelds) {
 // Discards the highest-deadwood-value card that isn't obviously part of a
 // pair (another card of the same rank) or a near-run (a same-suit card
 // within 2 rank positions) still sitting in hand - a simple heuristic, not a
-// lookahead search.
+// lookahead search. Jokers are never volunteered: this heuristic has no
+// lookahead to recognize when a Joker is about to complete a meld, and
+// Joker has the highest deadwood value of any card (see rules.js), so a
+// naive "discard the highest-value safe card" pass would otherwise dump a
+// wild card first every time - the opposite of how anyone actually plays.
 function chooseDiscard(hand) {
   if (!Array.isArray(hand) || !hand.length) {
     return null;
@@ -152,8 +156,10 @@ function chooseDiscard(hand) {
     });
   }
 
-  const safeToDiscard = hand.filter(function (card) { return !isPartOfPairOrNearRun(card); });
-  const pool = safeToDiscard.length ? safeToDiscard : hand;
+  const nonJokers = hand.filter(function (card) { return !rules.isJoker(card); });
+  const candidatePool = nonJokers.length ? nonJokers : hand;
+  const safeToDiscard = candidatePool.filter(function (card) { return !isPartOfPairOrNearRun(card); });
+  const pool = safeToDiscard.length ? safeToDiscard : candidatePool;
 
   return pool.reduce(function (highest, card) {
     return rules.cardValue(card) > rules.cardValue(highest) ? card : highest;

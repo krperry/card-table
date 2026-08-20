@@ -27,6 +27,18 @@ const RUMMY_RANK_ORDER = {
   A: 1, 2: 2, 3: 3, 4: 4, 5: 5, 6: 6, 7: 7, 8: 8, 9: 9, T: 10, J: 11, Q: 12, K: 13
 };
 const RUMMY_SUIT_SORT = { C: 0, D: 1, H: 2, S: 3 };
+// Jokers use suit char 'J' (see games/rummy/rules.js's matching constant) -
+// never a real suit, so it doubles as an unambiguous discriminator. Sorted
+// after Spades/King respectively so a Joker lands at the end of a hand
+// instead of colliding with RUMMY_SUIT_SORT/RUMMY_RANK_ORDER's undefined
+// lookup (which would otherwise produce NaN and corrupt the sort).
+const RUMMY_JOKER_SUIT_CHAR = 'J';
+const RUMMY_JOKER_SORT_SUIT = 4;
+const RUMMY_JOKER_SORT_RANK = 14;
+
+function rummyIsJoker(card) {
+  return typeof card === 'string' && card.charAt(1) === RUMMY_JOKER_SUIT_CHAR;
+}
 
 Object.assign(appState, {
   rummyHand: [],
@@ -56,6 +68,9 @@ function rummyCardSuit(card) {
 }
 
 function rummyCardName(card) {
+  if (rummyIsJoker(card)) {
+    return 'Joker';
+  }
   const rank = RUMMY_RANK_NAMES[rummyCardRank(card)];
   const suit = RUMMY_SUIT_NAMES[rummyCardSuit(card)];
   if (!rank || !suit) {
@@ -72,6 +87,18 @@ function rummyRankOrderValue(card) {
   return RUMMY_RANK_ORDER[rummyCardRank(card)] || 0;
 }
 
+// Joker-aware sort keys - a Joker has no fixed rank/suit, so RUMMY_RANK_ORDER
+// and RUMMY_SUIT_SORT (both keyed by real rank/suit chars) don't cover it;
+// falling through to their bare lookups would yield undefined and corrupt
+// the sort (undefined - number is NaN). Both sort a Joker to the end.
+function rummySortRankValue(card) {
+  return rummyIsJoker(card) ? RUMMY_JOKER_SORT_RANK : rummyRankOrderValue(card);
+}
+
+function rummySortSuitValue(card) {
+  return rummyIsJoker(card) ? RUMMY_JOKER_SORT_SUIT : RUMMY_SUIT_SORT[rummyCardSuit(card)];
+}
+
 // --- Hand sort preference (presentation only) -----------------------------
 // Mirrors cribbage-client.js's cribbageSortMode section exactly - only ever
 // reorders appState.rummyHand, the client's own copy of "what to show/
@@ -80,15 +107,15 @@ function rummyRankOrderValue(card) {
 
 function rummySortCardsByValue(cards) {
   return cards.slice().sort(function (a, b) {
-    const rankDiff = rummyRankOrderValue(a) - rummyRankOrderValue(b);
-    return rankDiff !== 0 ? rankDiff : RUMMY_SUIT_SORT[rummyCardSuit(a)] - RUMMY_SUIT_SORT[rummyCardSuit(b)];
+    const rankDiff = rummySortRankValue(a) - rummySortRankValue(b);
+    return rankDiff !== 0 ? rankDiff : rummySortSuitValue(a) - rummySortSuitValue(b);
   });
 }
 
 function rummySortCardsBySuit(cards) {
   return cards.slice().sort(function (a, b) {
-    const suitDiff = RUMMY_SUIT_SORT[rummyCardSuit(a)] - RUMMY_SUIT_SORT[rummyCardSuit(b)];
-    return suitDiff !== 0 ? suitDiff : rummyRankOrderValue(a) - rummyRankOrderValue(b);
+    const suitDiff = rummySortSuitValue(a) - rummySortSuitValue(b);
+    return suitDiff !== 0 ? suitDiff : rummySortRankValue(a) - rummySortRankValue(b);
   });
 }
 
@@ -153,19 +180,75 @@ function renderRummyStatus() {
   }
 }
 
+// --- Pile visual (sighted-only; decorative) -----------------------------
+// #rummy-status-pile above already carries this same information as text
+// for screen readers (unchanged) - this section is purely a visual stand-in
+// for what used to be that text's only presentation, replacing it with an
+// actual stock pile and discard pile of cards. It is marked aria-hidden in
+// index.html so screen reader users see no change: they still get this info
+// from #rummy-status-pile and from the P key (announceRummyPile()).
+
+function renderRummyPileVisual() {
+  const pileArea = document.getElementById('rummy-pile-area');
+  if (!pileArea) {
+    return;
+  }
+
+  const active = appState.rummyPhase && appState.rummyPhase !== 'waiting';
+  pileArea.classList.toggle('hidden', !active);
+  if (!active) {
+    return;
+  }
+
+  const stockCountEl = document.getElementById('rummy-stock-pile-count');
+  if (stockCountEl) {
+    stockCountEl.textContent = String(appState.rummyStockCount);
+  }
+  const stockImg = document.getElementById('rummy-stock-pile-img');
+  if (stockImg) {
+    stockImg.classList.toggle('rummy-pile-empty', appState.rummyStockCount === 0);
+  }
+
+  const discardImg = document.getElementById('rummy-discard-pile-img');
+  if (discardImg) {
+    if (appState.rummyDiscardTop) {
+      discardImg.src = rummyCardImageSrc(appState.rummyDiscardTop);
+      discardImg.classList.remove('rummy-pile-empty');
+    } else {
+      discardImg.removeAttribute('src');
+      discardImg.classList.add('rummy-pile-empty');
+    }
+  }
+}
+
 // --- Meld board (always-visible, public info) --------------------------------
 
+// A Joker's exact position within a group is genuinely ambiguous (see
+// games/rummy/rules.js's runEffectiveBounds() header) - rather than guess,
+// the label names the real cards (which fix the group's rank/suit identity)
+// and simply notes how many Jokers ride along.
 function rummyMeldGroupLabel(group) {
   if (!group || !Array.isArray(group.cards) || !group.cards.length) {
     return '';
   }
+  const jokerCount = group.cards.filter(rummyIsJoker).length;
+  const jokerNote = jokerCount ? (', plus ' + jokerCount + ' Joker' + (jokerCount === 1 ? '' : 's')) : '';
+  const realCards = group.cards.filter(function (card) { return !rummyIsJoker(card); });
+
   if (group.type === 'set') {
-    return 'Set: ' + RUMMY_RANK_NAMES[rummyCardRank(group.cards[0])] + 's';
+    if (!realCards.length) {
+      return 'Set: unknown' + jokerNote;
+    }
+    return 'Set: ' + RUMMY_RANK_NAMES[rummyCardRank(realCards[0])] + 's' + jokerNote;
   }
-  const sorted = group.cards.slice().sort(function (a, b) { return rummyRankOrderValue(a) - rummyRankOrderValue(b); });
+
+  if (!realCards.length) {
+    return 'Run: unknown' + jokerNote;
+  }
+  const sorted = realCards.slice().sort(function (a, b) { return rummyRankOrderValue(a) - rummyRankOrderValue(b); });
   const suit = RUMMY_SUIT_NAMES[rummyCardSuit(sorted[0])] || '';
   const ranks = sorted.map(function (card) { return RUMMY_RANK_NAMES[rummyCardRank(card)]; }).join('-');
-  return 'Run: ' + ranks + ' of ' + suit;
+  return 'Run: ' + ranks + ' of ' + suit + jokerNote;
 }
 
 function renderRummyMeldBoard() {
@@ -395,7 +478,14 @@ function renderRummyHand() {
 
   rummyBindCardGridKeys(container, {
     onEnter: rummyAttemptDiscardFocused,
-    getGroupKey: function (button) { return rummyCardSuit(button.dataset.card); }
+    // Group Up/Down navigation by whichever key the hand is CURRENTLY sorted
+    // by (rummySortMode, read fresh on every keypress via this closure) -
+    // grouping by suit while the hand is actually sorted by value (or vice
+    // versa) would jump between cards that aren't adjacent on screen, since
+    // that key's same-value cards aren't contiguous in the other sort order.
+    getGroupKey: function (button) {
+      return appState.rummySortMode === 'suit' ? rummyCardSuit(button.dataset.card) : rummyCardRank(button.dataset.card);
+    }
   });
 
   const displayHand = rummyDisplayHand();
@@ -493,6 +583,33 @@ function rummyCommitMeld() {
 // remains the sole source of truth and re-validates independently either
 // way - this is purely an informational pre-check to avoid a doomed
 // round trip and to give the player specific feedback.
+// Same "not stored explicitly" reasoning as games/rummy/rules.js's
+// runEffectiveBounds() - a run's covered span (accounting for Jokers used as
+// gap-fillers/extensions) is recomputed from its cards each time. Returns
+// null if the group has no real card to anchor it.
+function rummyRunEffectiveBounds(cards) {
+  const jokerCount = cards.filter(rummyIsJoker).length;
+  const realCards = cards.filter(function (c) { return !rummyIsJoker(c); });
+  if (!realCards.length) {
+    return null;
+  }
+  const values = realCards.map(rummyRankOrderValue).sort(function (a, b) { return a - b; });
+  let min = values[0];
+  let max = values[values.length - 1];
+  let leftover = jokerCount - ((max - min + 1) - values.length);
+  while (leftover > 0) {
+    if (min > 1) {
+      min--;
+    } else if (max < 13) {
+      max++;
+    } else {
+      break;
+    }
+    leftover--;
+  }
+  return { min: min, max: max };
+}
+
 function rummyCardCanExtendGroup(card, group) {
   if (!group || !Array.isArray(group.cards) || !group.cards.length) {
     return false;
@@ -501,20 +618,29 @@ function rummyCardCanExtendGroup(card, group) {
     if (group.cards.length >= 4) {
       return false;
     }
-    if (rummyCardRank(card) !== rummyCardRank(group.cards[0])) {
+    if (rummyIsJoker(card)) {
+      return true;
+    }
+    const realCards = group.cards.filter(function (c) { return !rummyIsJoker(c); });
+    if (!realCards.length || rummyCardRank(card) !== rummyCardRank(realCards[0])) {
       return false;
     }
-    return !group.cards.some(function (c) { return rummyCardSuit(c) === rummyCardSuit(card); });
+    return !realCards.some(function (c) { return rummyCardSuit(c) === rummyCardSuit(card); });
   }
   if (group.type === 'run') {
-    if (rummyCardSuit(card) !== rummyCardSuit(group.cards[0])) {
+    const bounds = rummyRunEffectiveBounds(group.cards);
+    if (!bounds) {
       return false;
     }
-    const values = group.cards.map(rummyRankOrderValue);
-    const minValue = Math.min.apply(null, values);
-    const maxValue = Math.max.apply(null, values);
+    if (rummyIsJoker(card)) {
+      return bounds.min > 1 || bounds.max < 13;
+    }
+    const realCards = group.cards.filter(function (c) { return !rummyIsJoker(c); });
+    if (rummyCardSuit(card) !== rummyCardSuit(realCards[0])) {
+      return false;
+    }
     const cardValue = rummyRankOrderValue(card);
-    return cardValue === minValue - 1 || cardValue === maxValue + 1;
+    return cardValue === bounds.min - 1 || cardValue === bounds.max + 1;
   }
   return false;
 }
@@ -594,6 +720,7 @@ function renderRummyControlButtons() {
 
 function renderRummyWidgets() {
   renderRummyStatus();
+  renderRummyPileVisual();
   renderRummyMeldBoard();
   renderRummySortControl();
   renderRummyHand();
@@ -652,8 +779,7 @@ function announceRummyTurnStatus() {
 }
 
 function announceRummyPile() {
-  const text = 'Stock: ' + appState.rummyStockCount + ' cards. Discard top: '
-    + (appState.rummyDiscardTop ? rummyCardName(appState.rummyDiscardTop) : 'none') + '.';
+  const text = appState.rummyDiscardTop ? (rummyCardName(appState.rummyDiscardTop) + '.') : 'The discard pile is empty.';
   srSpeak(text, 'polite', { canInterruptLock: true });
 }
 

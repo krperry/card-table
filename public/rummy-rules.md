@@ -2,8 +2,8 @@
 
 ## Objective
 
-Rummy is played by 2-6 players with a standard 52-card deck (no jokers).
-Each turn, a player draws a card, may lay down any number of melds or add
+Rummy is played by 2-6 players with a standard 52-card deck plus its 2
+Jokers (54 cards total). Each turn, a player draws a card, may lay down any number of melds or add
 cards to melds already on the table, and must then discard to end their
 turn. The first player to empty their hand **goes out** and wins the hand,
 scoring points equal to the total deadwood left in every other player's
@@ -46,6 +46,22 @@ you hold one.
 
 Melds are public: every player can see every meld on the table at all
 times.
+
+## Jokers
+
+The deck includes both Jokers. A Joker is wild: it can stand in for any card
+of the rank or suit a set or run needs, whether you're melding it from your
+hand or laying it off onto a meld already on the table. A meld still needs
+at least one real card to establish what it is - a group made entirely of
+Jokers isn't allowed, since there would be nothing to say what rank or suit
+it represents.
+
+**House rule:** a Joker left in your hand when a hand ends counts as **15
+deadwood points** - more than any real card - since it's the most valuable
+card to be caught holding. Basic Rummy sources vary on the exact penalty
+value; 15 is a common convention and keeps the game's existing pip-value
+deadwood scale (Ace 1, number cards their pip value, face cards 10) simply
+extended upward for the Joker.
 
 ## Laying Off
 
