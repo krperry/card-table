@@ -460,9 +460,13 @@ function rummyToggleSortMode() {
 
 function rummyUpdateHandButton(button, card) {
   const selected = appState.rummySelectedCards.indexOf(card) !== -1;
-  button.setAttribute('aria-pressed', selected ? 'true' : 'false');
+  // No aria-pressed here on purpose - it makes screen readers announce
+  // "toggle button" on every arrow-key move through the hand. The
+  // aria-label alone ("Eight of Clubs" / "Eight of Clubs, selected")
+  // carries the selection state instead, per the accessibility fix
+  // requested for blind players navigating the hand grid.
   button.classList.toggle('selected', selected);
-  button.setAttribute('aria-label', rummyCardName(card) + (selected ? ', marked' : ''));
+  button.setAttribute('aria-label', rummyCardName(card) + (selected ? ', selected' : ''));
 }
 
 function renderRummyHand() {
@@ -719,6 +723,7 @@ function renderRummyControlButtons() {
   const meldBtn = document.getElementById('rummy-meld-btn');
   const layoffBtn = document.getElementById('rummy-layoff-btn');
   const discardBtn = document.getElementById('rummy-discard-btn');
+  const unmarkBtn = document.getElementById('rummy-unmark-btn');
 
   if (drawStockBtn) {
     drawStockBtn.disabled = !drawPhase;
@@ -734,6 +739,9 @@ function renderRummyControlButtons() {
   }
   if (discardBtn) {
     discardBtn.disabled = !actionPhase || appState.rummySelectedCards.length !== 1;
+  }
+  if (unmarkBtn) {
+    unmarkBtn.disabled = !appState.rummySelectedCards.length;
   }
 }
 
@@ -1051,6 +1059,7 @@ function rummyBindControls() {
   bindPress(document.getElementById('rummy-meld-btn'), rummyCommitMeld);
   bindPress(document.getElementById('rummy-layoff-btn'), rummyCommitLayoff);
   bindPress(document.getElementById('rummy-discard-btn'), rummyAttemptDiscardSelected);
+  bindPress(document.getElementById('rummy-unmark-btn'), rummyUnmarkAllCards);
 }
 
 document.addEventListener('DOMContentLoaded', function () {

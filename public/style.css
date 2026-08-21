@@ -1321,6 +1321,12 @@ canvas {
   cursor: not-allowed;
 }
 
+.rummy-controls button.rummy-small-btn {
+  padding: 4px 10px;
+  font-size: 0.85em;
+  font-weight: 600;
+}
+
 .rummy-pile-area {
   display: flex;
   align-items: flex-end;
