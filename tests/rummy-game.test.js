@@ -565,3 +565,62 @@ test('rummyTurnState messages tell a blind player where a draw came from (withou
     child.kill('SIGTERM');
   }
 });
+
+test("a bot's draw and discard - which run synchronously back-to-back within a single turn - are combined into one rummyTurnState message instead of the draw announcement being overwritten", async () => {
+  const port = 3206;
+  const child = startChild(port);
+  const sockets = [];
+
+  try {
+    await waitForServer(child, port);
+    const p1 = await connectAndRegister(port, `rummy-bot-announce-${Date.now()}@example.com`, `RummyBotAnnounce${Date.now()}`);
+    sockets.push(p1.socket);
+
+    const table = await createRummyTable(p1.socket);
+
+    const inGamePromise = waitForEvent(p1.socket, 'tableState', (payload) => payload && payload.table && payload.table.status === 'in_game', 5000);
+    p1.socket.emit('startGame');
+    const inGameTable = (await inGamePromise).table;
+
+    const p1Index = inGameTable.players.findIndex((player) => player.id === p1.socket.id);
+    const botIndex = 1 - p1Index;
+    const botName = inGameTable.players[botIndex].name;
+
+    // No pairs and no runs in either hand, and the discard top doesn't
+    // complete a visible meld for the bot - so the bot draws from the stock,
+    // finds nothing to meld or lay off, and immediately discards. Those two
+    // perform*() calls (and their queueRummyTurnEvent() calls) happen back
+    // to back inside the same synchronous runBotTurn() invocation.
+    const hands = [[], []];
+    hands[botIndex] = ['2C', '5D', '9H'];
+    hands[p1Index] = ['3C', '4C', '5H'];
+
+    const botTurnDonePromise = waitForEvent(p1.socket, 'rummyTurnState', (payload) => payload.turnPhase === 'draw' && payload.turnPlayerId === p1.socket.id, 5000);
+    p1.socket.emit('__testSetTableState', {
+      tableId: table.id,
+      game: {
+        phase: 'playing',
+        turnIndex: botIndex,
+        turnPhase: 'draw',
+        dealerIndex: p1Index,
+        hands: hands,
+        stock: ['KH', 'QS'],
+        discardPile: ['2H'],
+        melds: [[], []]
+      },
+      emitRummyTurnState: true
+    });
+
+    const botTurnDone = await botTurnDonePromise;
+    // Both sub-actions must survive in the one message the client actually
+    // renders/speaks - if the draw announcement got clobbered by the
+    // discard announcement (the bug this test guards against), the message
+    // would start with "<bot> discards" instead of "<bot> draws".
+    assert.equal(botTurnDone.message, botName + ' draws from the stack. ' + botName + ' discards Queen of Spades. It is your turn.');
+    assert.ok(!botTurnDone.message.includes('KH'));
+    assert.ok(!/King of Hearts/i.test(botTurnDone.message));
+  } finally {
+    sockets.forEach((socket) => { if (socket.connected) socket.disconnect(); });
+    child.kill('SIGTERM');
+  }
+});

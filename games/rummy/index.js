@@ -77,7 +77,9 @@ module.exports = function createRummyGame(deps) {
       discardPile: [],
       melds: table.players.map(function () { return []; }),
       pendingHandAcks: null,
-      botTimer: null
+      botTimer: null,
+      pendingTurnEvents: [],
+      turnStateFlushScheduled: false
     };
   }
 
@@ -144,12 +146,15 @@ module.exports = function createRummyGame(deps) {
     io.to(table.id).emit('actionNotice', 'Hand ' + table.game.handNumber + '. ' + table.players[table.game.turnIndex].name + ' draws first.');
     sendHands(table);
     emitTableState(table);
-    emitRummyTurnState(table, null);
+    queueRummyTurnEvent(table, null);
   }
 
-  function buildTurnMessage(table, recipientIndex, lastEvent) {
+  function buildTurnMessage(table, recipientIndex, events) {
     const parts = [];
-    if (lastEvent) {
+    (events || []).forEach(function (lastEvent) {
+      if (!lastEvent) {
+        return;
+      }
       if (lastEvent.type === 'draw' && lastEvent.playerIndex !== recipientIndex) {
         // The stock is face-down - naming the card would leak hidden
         // information other players aren't supposed to have. The discard
@@ -168,7 +173,7 @@ module.exports = function createRummyGame(deps) {
       } else if (lastEvent.type === 'discard' && lastEvent.playerIndex !== recipientIndex) {
         parts.push(lastEvent.playerName + ' discards ' + rules.cardName(lastEvent.card) + '.');
       }
-    }
+    });
     // Only announce whose turn it is at the start of a fresh turn (turnPhase
     // 'draw') - not on every meld/lay-off call within the SAME player's
     // still-ongoing turn, which would otherwise repeat "Your turn." after
@@ -183,7 +188,58 @@ module.exports = function createRummyGame(deps) {
     return parts.length ? parts.join(' ') : null;
   }
 
-  function emitRummyTurnState(table, lastEvent) {
+  // A bot's whole turn (draw -> meld/layoff -> discard) runs synchronously in
+  // one go inside runBotTurn(), which used to call emitRummyTurnState()
+  // directly after every single sub-action. Each call sent its own
+  // 'rummyTurnState' message, and on the client, srSpeak() cancels any
+  // not-yet-rendered previous announcement when a new one arrives (see
+  // public/main.js) - so a bot's draw announcement was routinely stomped by
+  // its own very next discard announcement arriving a moment later, and a
+  // blind opponent never heard the draw at all. Queuing events here and
+  // flushing them once via setImmediate - after the whole synchronous burst
+  // of perform*() calls for this turn has finished - combines them into a
+  // single message/emit instead, e.g. "Amy draws from the stack. Amy
+  // discards Nine of Spades. It is your turn." A human player's actions are
+  // always separate socket round-trips (real time apart), so in that case
+  // there is normally only ever one event queued per flush and this changes
+  // nothing observable beyond the same one-tick defer.
+  function queueRummyTurnEvent(table, lastEvent) {
+    if (!table || !table.game) {
+      return;
+    }
+    if (!Array.isArray(table.game.pendingTurnEvents)) {
+      table.game.pendingTurnEvents = [];
+    }
+    if (lastEvent) {
+      table.game.pendingTurnEvents.push(lastEvent);
+    }
+    if (table.game.turnStateFlushScheduled) {
+      return;
+    }
+    table.game.turnStateFlushScheduled = true;
+    setImmediate(function () {
+      flushRummyTurnState(table);
+    });
+  }
+
+  function flushRummyTurnState(table) {
+    if (!table || !table.game) {
+      return;
+    }
+    const events = table.game.pendingTurnEvents || [];
+    table.game.pendingTurnEvents = [];
+    table.game.turnStateFlushScheduled = false;
+
+    // The queued turn may have gone out (finishHand() ran mid-burst, e.g. a
+    // meld emptied the hand) since these events were queued - table.game may
+    // now be null (game over) or past 'playing' (hand_complete). Either way
+    // finishHand() already told players directly (rummyHandSummary/
+    // actionNotice); a stale rummyTurnState here would just misreport turn
+    // info for a hand that's already over, so drop it.
+    if (!table.game || table.game.phase !== 'playing') {
+      return;
+    }
+
     const turnPlayer = table.players[table.game.turnIndex];
     if (!turnPlayer) {
       return;
@@ -201,7 +257,7 @@ module.exports = function createRummyGame(deps) {
         stockCount: table.game.stock.length,
         discardTop: discardTop,
         melds: table.game.melds,
-        message: buildTurnMessage(table, index, lastEvent)
+        message: buildTurnMessage(table, index, events)
       });
     });
 
@@ -321,7 +377,7 @@ module.exports = function createRummyGame(deps) {
     sendHand(table, player, playerIndex);
 
     emitTableState(table);
-    emitRummyTurnState(table, { type: 'draw', playerIndex: playerIndex, playerName: player.name, source: 'stock' });
+    queueRummyTurnEvent(table, { type: 'draw', playerIndex: playerIndex, playerName: player.name, source: 'stock' });
   }
 
   function performDrawDiscard(table, actingId) {
@@ -353,7 +409,7 @@ module.exports = function createRummyGame(deps) {
     sendHand(table, player, playerIndex);
 
     emitTableState(table);
-    emitRummyTurnState(table, { type: 'draw', playerIndex: playerIndex, playerName: player.name, source: 'discard', card: card });
+    queueRummyTurnEvent(table, { type: 'draw', playerIndex: playerIndex, playerName: player.name, source: 'discard', card: card });
   }
 
   function performMeldCards(table, actingId, cards) {
@@ -398,7 +454,7 @@ module.exports = function createRummyGame(deps) {
     }
 
     emitTableState(table);
-    emitRummyTurnState(table, { type: 'meld', playerIndex: playerIndex, playerName: player.name, meldType: classification.type });
+    queueRummyTurnEvent(table, { type: 'meld', playerIndex: playerIndex, playerName: player.name, meldType: classification.type });
   }
 
   function performLayOffCards(table, actingId, targetPlayerIndex, cards) {
@@ -466,7 +522,7 @@ module.exports = function createRummyGame(deps) {
     }
 
     emitTableState(table);
-    emitRummyTurnState(table, { type: 'layoff', playerIndex: playerIndex, playerName: player.name, cards: cards });
+    queueRummyTurnEvent(table, { type: 'layoff', playerIndex: playerIndex, playerName: player.name, cards: cards });
   }
 
   function performDiscardCard(table, actingId, card) {
@@ -505,7 +561,7 @@ module.exports = function createRummyGame(deps) {
     table.game.turnPhase = 'draw';
 
     emitTableState(table);
-    emitRummyTurnState(table, { type: 'discard', playerIndex: playerIndex, playerName: player.name, card: card });
+    queueRummyTurnEvent(table, { type: 'discard', playerIndex: playerIndex, playerName: player.name, card: card });
   }
 
   function finishHand(table, wentOutPlayerIndex) {
@@ -708,7 +764,7 @@ module.exports = function createRummyGame(deps) {
     sendHand(table, player, index);
 
     if (table.game.phase === 'playing') {
-      emitRummyTurnState(table, null);
+      queueRummyTurnEvent(table, null);
     }
   }
 
@@ -753,7 +809,7 @@ module.exports = function createRummyGame(deps) {
     }
 
     if (payload.emitRummyTurnState) {
-      emitRummyTurnState(table, null);
+      queueRummyTurnEvent(table, null);
     }
   }
 
