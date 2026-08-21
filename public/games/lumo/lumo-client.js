@@ -519,7 +519,7 @@ function handleGameKeys(event) {
     if (appState.hand.length) {
       appState.handIndex = Math.max(0, appState.handIndex - 1);
       drawHand();
-      message = getSelectedCardDescription() + ' selected';
+      message = getSelectedCardDescription();
     } else {
       message = 'No cards in hand';
     }
@@ -528,7 +528,7 @@ function handleGameKeys(event) {
     if (appState.hand.length) {
       appState.handIndex = Math.min(appState.hand.length - 1, appState.handIndex + 1);
       drawHand();
-      message = getSelectedCardDescription() + ' selected';
+      message = getSelectedCardDescription();
     } else {
       message = 'No cards in hand';
     }
@@ -537,7 +537,7 @@ function handleGameKeys(event) {
     if (appState.hand.length) {
       appState.handIndex = lumoHandGroupNavIndex('next');
       drawHand();
-      message = getSelectedCardDescription() + ' selected';
+      message = getSelectedCardDescription();
     } else {
       message = 'No cards in hand';
     }
@@ -546,7 +546,7 @@ function handleGameKeys(event) {
     if (appState.hand.length) {
       appState.handIndex = lumoHandGroupNavIndex('prev');
       drawHand();
-      message = getSelectedCardDescription() + ' selected';
+      message = getSelectedCardDescription();
     } else {
       message = 'No cards in hand';
     }
@@ -555,7 +555,7 @@ function handleGameKeys(event) {
     if (appState.hand.length) {
       appState.handIndex = 0;
       drawHand();
-      message = getSelectedCardDescription() + ' selected';
+      message = getSelectedCardDescription();
     } else {
       message = 'No cards in hand';
     }
@@ -564,7 +564,7 @@ function handleGameKeys(event) {
     if (appState.hand.length) {
       appState.handIndex = appState.hand.length - 1;
       drawHand();
-      message = getSelectedCardDescription() + ' selected';
+      message = getSelectedCardDescription();
     } else {
       message = 'No cards in hand';
     }
@@ -876,7 +876,7 @@ function announcePlayableCardsAndSelectByScore(wantHighest) {
   const listText = playable.map(function (entry) {
     return describeCardForSpeech(entry.card);
   }).join(', ');
-  const selectedText = describeCardForSpeech(selected.card) + ' selected.';
+  const selectedText = describeCardForSpeech(selected.card) + '.';
   const intro = wantHighest
     ? 'Playable cards, highest score first:'
     : 'Playable cards, lowest score first:';
@@ -1210,7 +1210,7 @@ function navigateToColorExtreme(color, wantHighest) {
 
   appState.handIndex = bestIndex;
   drawHand();
-  srSpeak(getSelectedCardDescription() + ' selected', 'assertive', { canInterruptLock: true });
+  srSpeak(getSelectedCardDescription(), 'assertive', { canInterruptLock: true });
   return true;
 }
 

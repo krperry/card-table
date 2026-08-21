@@ -394,14 +394,18 @@ function cribbageToggleSortMode() {
 function cribbageDiscardAriaLabel(card) {
   const selectedIndex = appState.cribbageSelectedDiscard.indexOf(card);
   if (selectedIndex === -1) {
-    return cribbageCardName(card) + ', not selected';
+    return cribbageCardName(card);
   }
   return cribbageCardName(card) + ', selected for discard, ' + appState.cribbageSelectedDiscard.length + ' of 2 selected';
 }
 
 function cribbageUpdateDiscardButton(button, card) {
   const selected = appState.cribbageSelectedDiscard.indexOf(card) !== -1;
-  button.setAttribute('aria-pressed', selected ? 'true' : 'false');
+  // No aria-pressed here on purpose - it makes screen readers announce
+  // "toggle button" on every arrow-key move through the hand. The
+  // aria-label alone ("Five of Spades" / "Five of Spades, selected for
+  // discard, ...") carries the selection state instead, matching the
+  // rummy-client.js hand-button pattern.
   button.classList.toggle('selected', selected);
   button.setAttribute('aria-label', cribbageDiscardAriaLabel(card));
 }

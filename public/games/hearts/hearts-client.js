@@ -323,14 +323,18 @@ function heartsRebuildCardButtons(container, cards, buildButton) {
 function heartsPassAriaLabel(card) {
   const selectedIndex = appState.heartsSelectedPass.indexOf(card);
   if (selectedIndex === -1) {
-    return heartsCardName(card) + ', not selected';
+    return heartsCardName(card);
   }
   return heartsCardName(card) + ', selected for passing, ' + appState.heartsSelectedPass.length + ' of 3 selected';
 }
 
 function heartsUpdatePassButton(button, card) {
   const selected = appState.heartsSelectedPass.indexOf(card) !== -1;
-  button.setAttribute('aria-pressed', selected ? 'true' : 'false');
+  // No aria-pressed here on purpose - it makes screen readers announce
+  // "toggle button" on every arrow-key move through the hand. The
+  // aria-label alone ("Five of Spades" / "Five of Spades, selected for
+  // passing, ...") carries the selection state instead, matching the
+  // rummy-client.js hand-button pattern.
   button.classList.toggle('selected', selected);
   button.setAttribute('aria-label', heartsPassAriaLabel(card));
 }
