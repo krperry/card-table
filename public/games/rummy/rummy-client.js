@@ -789,8 +789,56 @@ function rummyCardCanExtendGroup(card, group) {
   return false;
 }
 
+// Client-side duplicate of games/rummy/rules.js's findJokerSwapTarget - a
+// real card that matches exactly what a Joker in `group` is standing in for
+// may swap it out (the Joker returns to hand, the real card takes its
+// place), even when rummyCardCanExtendGroup() above says no (e.g. a run slot
+// a Joker already fills). Same "informational pre-check only" caveat as
+// rummyCardCanExtendGroup - the server remains the sole source of truth.
+function rummyFindJokerSwapTarget(card, group) {
+  if (!group || !Array.isArray(group.cards) || rummyIsJoker(card)) {
+    return null;
+  }
+  const jokers = group.cards.filter(rummyIsJoker);
+  if (!jokers.length) {
+    return null;
+  }
+  const realCards = group.cards.filter(function (c) { return !rummyIsJoker(c); });
+  if (!realCards.length) {
+    return null;
+  }
+
+  if (group.type === 'set') {
+    if (rummyCardRank(card) !== rummyCardRank(realCards[0])) {
+      return null;
+    }
+    const suit = rummyCardSuit(card);
+    return realCards.some(function (c) { return rummyCardSuit(c) === suit; }) ? null : jokers[0];
+  }
+
+  if (group.type === 'run') {
+    if (rummyCardSuit(card) !== rummyCardSuit(realCards[0])) {
+      return null;
+    }
+    const bounds = rummyRunEffectiveBounds(group.cards);
+    if (!bounds) {
+      return null;
+    }
+    const cardPosition = rummyRankOrderValue(card);
+    if (cardPosition < bounds.min || cardPosition > bounds.max) {
+      return null;
+    }
+    return realCards.some(function (c) { return rummyRankOrderValue(c) === cardPosition; }) ? null : jokers[0];
+  }
+
+  return null;
+}
+
 function rummyCardCanExtendAnyGroup(card, groups) {
-  return Array.isArray(groups) && groups.some(function (group) { return rummyCardCanExtendGroup(card, group); });
+  if (!Array.isArray(groups)) {
+    return false;
+  }
+  return groups.some(function (group) { return rummyCardCanExtendGroup(card, group) || rummyFindJokerSwapTarget(card, group); });
 }
 
 function rummyGetFocusedHandCard() {
@@ -1108,7 +1156,11 @@ socket.on('rummyLayOffResult', function (payload) {
     playErrorTone();
     return;
   }
-  srSpeak('Lay-off complete.', 'polite', { canInterruptLock: true });
+  const jokerCount = (payload.returnedJokers || []).length;
+  const message = jokerCount
+    ? 'Lay-off complete. You take the Joker' + (jokerCount > 1 ? 's' : '') + ' into your hand.'
+    : 'Lay-off complete.';
+  srSpeak(message, 'polite', { canInterruptLock: true });
 });
 
 socket.on('rummyDiscardResult', function (payload) {

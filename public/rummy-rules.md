@@ -63,6 +63,15 @@ value; 15 is a common convention and keeps the game's existing pip-value
 deadwood scale (Ace 1, number cards their pip value, face cards 10) simply
 extended upward for the Joker.
 
+**Swapping a Joker back:** if you lay off a real card that exactly matches
+what a Joker on the table is currently standing in for, the swap happens
+automatically - the Joker comes off the meld and into your hand, and your
+real card takes its place. For example, a run of A♥ 2♥ Joker♥ (the Joker
+standing in for 3♥) accepts a laid-off 3♥ this way; a set of 5♥ 5♣ Joker♠
+accepts a laid-off 5♦ the same way. This works even when a set already has
+four cards, since the meld's size doesn't change - only the Joker leaves and
+the real card takes its slot.
+
 ## Laying Off
 
 Once a meld is on the table, any player may **lay off** matching cards onto

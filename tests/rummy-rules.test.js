@@ -249,6 +249,35 @@ test('canExtendMeld: a Joker can extend a run at either end, but not past the ac
   assert.ok(!rules.canExtendMeld(fullSpan, '1J'));
 });
 
+test('findJokerSwapTarget: a run gives back the Joker filling the exact slot a real card completes', () => {
+  const run = { type: 'run', cards: ['AH', '2H', '1J'] }; // covers 1-2-3, Joker = 3H
+  assert.equal(rules.findJokerSwapTarget(run, '3H'), '1J');
+  // Off-suit or a slot the run doesn't cover (not the Joker's slot) is not a swap.
+  assert.equal(rules.findJokerSwapTarget(run, '3D'), null);
+  assert.equal(rules.findJokerSwapTarget(run, '4H'), null); // that's a plain extend, not a swap
+  assert.equal(rules.findJokerSwapTarget(run, 'AH'), null); // that slot already has a real card, nothing to swap
+});
+
+test('findJokerSwapTarget: a set gives back the Joker filling a missing suit a real card completes', () => {
+  const set = { type: 'set', cards: ['5H', '5C', '2J'] };
+  assert.equal(rules.findJokerSwapTarget(set, '5D'), '2J');
+  assert.equal(rules.findJokerSwapTarget(set, '5S'), '2J');
+  assert.equal(rules.findJokerSwapTarget(set, '5H'), null); // suit already real, not a swap
+  assert.equal(rules.findJokerSwapTarget(set, '6D'), null); // wrong rank
+});
+
+test('findJokerSwapTarget: works even when a set already has 4 cards (swap does not grow the group)', () => {
+  const fullSet = { type: 'set', cards: ['5H', '5C', '5S', '1J'] };
+  assert.equal(rules.findJokerSwapTarget(fullSet, '5D'), '1J');
+});
+
+test('findJokerSwapTarget: returns null with no Joker present, or when the card itself is a Joker', () => {
+  const setNoJoker = { type: 'set', cards: ['5H', '5C', '5S'] };
+  assert.equal(rules.findJokerSwapTarget(setNoJoker, '5D'), null);
+  const runWithJoker = { type: 'run', cards: ['4H', '1J', '6H'] };
+  assert.equal(rules.findJokerSwapTarget(runWithJoker, '2J'), null);
+});
+
 test('scoreHand counts a Joker left in hand as 15 deadwood', () => {
   const hands = [[], ['1J', '5H']];
   const result = rules.scoreHand(hands, 0);

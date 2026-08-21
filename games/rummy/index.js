@@ -487,13 +487,26 @@ module.exports = function createRummyGame(deps) {
 
     // Simulate against a deep copy first so the whole batch either lands or
     // rejects together - never partially apply. A screen-reader user needs a
-    // single clear reason for a rejected batch, not a half-applied one.
+    // single clear reason for a rejected batch, not a half-applied one. A
+    // card that exactly matches what a Joker already in the group is
+    // standing in for triggers an automatic swap - see
+    // rules.findJokerSwapTarget() - rather than a plain extension, and is
+    // checked first since it's the more specific case (canExtendMeld would
+    // often say no to the very same card, e.g. a run slot a Joker already
+    // fills - see its header comment).
     const simulatedGroups = targetGroups.map(function (group) { return { type: group.type, cards: group.cards.slice() }; });
     const assignments = [];
     for (let i = 0; i < cards.length; i++) {
       const card = cards[i];
       let attachedGroupIndex = -1;
+      let jokerToReturn = null;
       for (let g = 0; g < simulatedGroups.length; g++) {
+        const swapJoker = rules.findJokerSwapTarget(simulatedGroups[g], card);
+        if (swapJoker) {
+          attachedGroupIndex = g;
+          jokerToReturn = swapJoker;
+          break;
+        }
         if (rules.canExtendMeld(simulatedGroups[g], card)) {
           attachedGroupIndex = g;
           break;
@@ -503,17 +516,29 @@ module.exports = function createRummyGame(deps) {
         io.to(actingId).emit('rummyLayOffResult', { success: false, message: rules.cardName(card) + ' cannot be laid off onto that player’s melds' });
         return;
       }
-      simulatedGroups[attachedGroupIndex].cards.push(card);
-      assignments.push(attachedGroupIndex);
+      const simGroup = simulatedGroups[attachedGroupIndex];
+      if (jokerToReturn) {
+        simGroup.cards.splice(simGroup.cards.indexOf(jokerToReturn), 1);
+      }
+      simGroup.cards.push(card);
+      assignments.push({ groupIndex: attachedGroupIndex, jokerToReturn: jokerToReturn });
     }
 
+    const returnedJokers = [];
     cards.forEach(function (card, i) {
       hand.splice(hand.indexOf(card), 1);
-      targetGroups[assignments[i]].cards.push(card);
+      const assignment = assignments[i];
+      const group = targetGroups[assignment.groupIndex];
+      if (assignment.jokerToReturn) {
+        group.cards.splice(group.cards.indexOf(assignment.jokerToReturn), 1);
+        hand.push(assignment.jokerToReturn);
+        returnedJokers.push(assignment.jokerToReturn);
+      }
+      group.cards.push(card);
     });
 
     const player = table.players[playerIndex];
-    io.to(actingId).emit('rummyLayOffResult', { success: true, message: '' });
+    io.to(actingId).emit('rummyLayOffResult', { success: true, message: '', returnedJokers: returnedJokers });
     sendHand(table, player, playerIndex);
 
     if (hand.length === 0) {

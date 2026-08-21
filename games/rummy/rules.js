@@ -357,6 +357,58 @@ function canExtendMeld(meldGroup, card) {
   return false;
 }
 
+// A "joker swap" lay-off (see public/rummy-rules.md): a real card that
+// matches exactly what a Joker in `meldGroup` is currently standing in for
+// may take that Joker's place - the Joker comes off the table and into the
+// laying-off player's hand, and `card` fills the slot instead. This is a
+// distinct case from canExtendMeld() above, which only ever grows a group;
+// here the group's size is unchanged, so it applies even when a set is
+// already at MAX_SET_SIZE. Returns the specific Joker card to hand back, or
+// null if `card` doesn't match any Joker's slot in this group (including
+// when meldGroup has no Joker at all, or `card` is itself a Joker - a Joker
+// can never swap out another Joker).
+function findJokerSwapTarget(meldGroup, card) {
+  if (!meldGroup || !Array.isArray(meldGroup.cards) || isJoker(card)) {
+    return null;
+  }
+  const jokers = meldGroup.cards.filter(isJoker);
+  if (!jokers.length) {
+    return null;
+  }
+  const nonJokers = meldGroup.cards.filter(function (c) { return !isJoker(c); });
+  if (!nonJokers.length) {
+    return null;
+  }
+
+  if (meldGroup.type === 'set') {
+    if (rankOf(nonJokers[0]) !== rankOf(card)) {
+      return null;
+    }
+    const suit = suitOf(card);
+    const suitTaken = nonJokers.some(function (c) { return suitOf(c) === suit; });
+    return suitTaken ? null : jokers[0];
+  }
+
+  if (meldGroup.type === 'run') {
+    const suit = suitOf(nonJokers[0]);
+    if (suitOf(card) !== suit) {
+      return null;
+    }
+    const bounds = runEffectiveBounds(meldGroup.cards);
+    if (!bounds) {
+      return null;
+    }
+    const cardPosition = rankOrderValue(card);
+    if (cardPosition < bounds.min || cardPosition > bounds.max) {
+      return null;
+    }
+    const positionTaken = nonJokers.some(function (c) { return rankOrderValue(c) === cardPosition; });
+    return positionTaken ? null : jokers[0];
+  }
+
+  return null;
+}
+
 function isStockExhausted(stock) {
   return !Array.isArray(stock) || stock.length === 0;
 }
@@ -434,6 +486,7 @@ module.exports = {
   isValidRun: isValidRun,
   classifyMeld: classifyMeld,
   canExtendMeld: canExtendMeld,
+  findJokerSwapTarget: findJokerSwapTarget,
   isStockExhausted: isStockExhausted,
   reshuffleDiscardIntoStock: reshuffleDiscardIntoStock,
   scoreHand: scoreHand,

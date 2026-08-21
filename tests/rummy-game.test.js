@@ -624,3 +624,96 @@ test("a bot's draw and discard - which run synchronously back-to-back within a s
     child.kill('SIGTERM');
   }
 });
+
+test('laying off a real card onto a slot a Joker is filling swaps the Joker back into the layer-off’s hand, in both a run and a set', async () => {
+  const port = 3207;
+  const child = startChild(port);
+  const sockets = [];
+
+  try {
+    await waitForServer(child, port);
+    const p1 = await connectAndRegister(port, `rummy-jokerswap-p1-${Date.now()}@example.com`, `RummyJokerSwapP1${Date.now()}`);
+    const p2 = await connectAndRegister(port, `rummy-jokerswap-p2-${Date.now()}@example.com`, `RummyJokerSwapP2${Date.now()}`);
+    sockets.push(p1.socket, p2.socket);
+
+    const table = await createRummyTable(p1.socket);
+    const joined = waitForEvent(p2.socket, 'tableState', (payload) => payload && payload.table && payload.table.id === table.id, 5000);
+    p2.socket.emit('joinTable', { tableId: table.id });
+    await joined;
+
+    const inGamePromise = waitForEvent(p1.socket, 'tableState', (payload) => payload && payload.table && payload.table.status === 'in_game', 5000);
+    p1.socket.emit('startGame');
+    const inGameTable = (await inGamePromise).table;
+
+    const p1Index = inGameTable.players.findIndex((player) => player.id === p1.socket.id);
+    const p2Index = 1 - p1Index;
+
+    // p1's existing melds: a run of A-H 2-H Joker-H (the Joker standing in
+    // for 3H), and a set of 5H 5C Joker-S (the Joker standing in for either
+    // missing suit). p2 holds the exact cards that complete each Joker's
+    // slot.
+    const melds = [[], []];
+    melds[p1Index] = [
+      { type: 'run', cards: ['AH', '2H', '1J'] },
+      { type: 'set', cards: ['5H', '5C', '2J'] }
+    ];
+
+    const hands = [[], []];
+    hands[p2Index] = ['3H', '5D', '9S'];
+    hands[p1Index] = ['KC', 'QD'];
+
+    // Match on stockCount (2, distinct from the real deal's much larger
+    // stock) rather than just turnPlayerId - with 2 real players, the real
+    // deal's own opening rummyTurnState (queued from beginRound(), before
+    // this __testSetTableState override is even applied) can coincidentally
+    // also have p2 as turnPlayerId, which would resolve this promise on the
+    // wrong (stale, pre-override) event.
+    const readyPromise = waitForEvent(p2.socket, 'rummyTurnState', (payload) => payload.turnPlayerId === p2.socket.id && payload.stockCount === 2, 5000);
+    p1.socket.emit('__testSetTableState', {
+      tableId: table.id,
+      game: {
+        phase: 'playing',
+        turnIndex: p2Index,
+        turnPhase: 'action',
+        dealerIndex: p1Index,
+        hands: hands,
+        stock: ['8C', '9C'],
+        discardPile: ['TD'],
+        melds: melds
+      },
+      emitRummyTurnState: true
+    });
+    await readyPromise;
+
+    // Swap #1: lay off 3H onto p1's run - takes back the Joker standing in for 3H.
+    // Drain its own rummyTurnState flush before starting swap #2, so that
+    // event can't be the one a later waitForEvent(..., 'rummyTurnState', ...)
+    // ends up catching instead of swap #2's.
+    const runSwapPromise = waitForEvent(p2.socket, 'rummyLayOffResult', () => true, 5000);
+    const runSwapTurnStatePromise = waitForEvent(p2.socket, 'rummyTurnState', () => true, 5000);
+    p2.socket.emit('rummyLayOffCards', { targetPlayerIndex: p1Index, cards: ['3H'] });
+    const runSwap = await runSwapPromise;
+    assert.equal(runSwap.success, true);
+    assert.deepEqual(runSwap.returnedJokers, ['1J']);
+    await runSwapTurnStatePromise;
+
+    // Swap #2: lay off 5D onto p1's set - takes back the other Joker. The
+    // rummyTurnState the server sends right after this also carries the
+    // updated melds, confirming both Jokers are off the table and the real
+    // cards took their place.
+    const setSwapPromise = waitForEvent(p2.socket, 'rummyLayOffResult', () => true, 5000);
+    const turnStateAfterSwapsPromise = waitForEvent(p2.socket, 'rummyTurnState', () => true, 5000);
+    p2.socket.emit('rummyLayOffCards', { targetPlayerIndex: p1Index, cards: ['5D'] });
+    const setSwap = await setSwapPromise;
+    assert.equal(setSwap.success, true);
+    assert.deepEqual(setSwap.returnedJokers, ['2J']);
+
+    const turnStateAfterSwaps = await turnStateAfterSwapsPromise;
+    const p1Melds = turnStateAfterSwaps.melds[p1Index];
+    assert.deepEqual(p1Melds[0].cards.slice().sort(), ['2H', '3H', 'AH']);
+    assert.deepEqual(p1Melds[1].cards.slice().sort(), ['5C', '5D', '5H']);
+  } finally {
+    sockets.forEach((socket) => { if (socket.connected) socket.disconnect(); });
+    child.kill('SIGTERM');
+  }
+});
