@@ -898,12 +898,6 @@ socket.on('rummyTurnState', function (payload) {
   if (payload.message) {
     srSpeak(payload.message, 'assertive', { canInterruptLock: true, lockMs: 900 });
   }
-
-  if (payload.turnPlayerId === socket.id && payload.turnPhase === 'draw') {
-    window.requestAnimationFrame(function () {
-      rummyFocusFirstEnabledButton(document.getElementById('rummy-controls'));
-    });
-  }
 });
 
 socket.on('rummyDrawResult', function (payload) {
