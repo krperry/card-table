@@ -329,6 +329,8 @@ function rummyFocusFirstEnabledButton(container) {
   if (!container) {
     return;
   }
+  // rummy-hand's buttons use roving tabindex (never individually disabled),
+  // same as hearts-client.js/spades-client.js's identical helper.
   const button = container.querySelector('button[tabindex="0"]') || container.querySelector('button');
   if (button && typeof button.focus === 'function') {
     button.focus();
@@ -524,6 +526,25 @@ function rummyToggleCard(card, button) {
   }
   rummyUpdateHandButton(button, card);
   renderRummyControlButtons();
+}
+
+// Clears every marked card without rebuilding the hand grid (unlike a resort
+// or a fresh rummyHand event) - so the currently focused button and its
+// position stay exactly where they were, satisfying "focus/position must be
+// preserved" for the U shortcut below. Harmless (and still announces) when
+// nothing is marked.
+function rummyUnmarkAllCards() {
+  if (appState.rummySelectedCards.length) {
+    appState.rummySelectedCards = [];
+    const container = document.getElementById('rummy-hand');
+    if (container) {
+      Array.prototype.forEach.call(container.querySelectorAll('button'), function (button) {
+        rummyUpdateHandButton(button, button.dataset.card);
+      });
+    }
+    renderRummyControlButtons();
+  }
+  srSpeak('All cards unmarked.', 'polite', { canInterruptLock: true });
 }
 
 // --- Actions -------------------------------------------------------------
@@ -839,6 +860,9 @@ function handleRummyKeys(event) {
   } else if (key === 'l') {
     rummyCommitLayoff();
     event.preventDefault();
+  } else if (key === 'u') {
+    rummyUnmarkAllCards();
+    event.preventDefault();
   } else if (key === 's' && event.shiftKey) {
     announceRummyAllScores();
     event.preventDefault();
@@ -897,6 +921,27 @@ socket.on('rummyTurnState', function (payload) {
 
   if (payload.message) {
     srSpeak(payload.message, 'assertive', { canInterruptLock: true, lockMs: 900 });
+  }
+
+  // Rummy's turns are strictly sequential (unlike Hearts/Spades' four-way
+  // trick play, only one seat is ever waiting to act) - the moment turnPhase
+  // is 'draw' and this client is that seat, that's the start of a brand new
+  // turn for this player (their own subsequent meld/lay-off actions stay in
+  // 'action' phase and don't retrigger this), so move focus onto the hand
+  // grid the same way spadesTurnState moves focus onto #spades-hand in
+  // spades-client.js. It lands on the HAND (not the draw controls) because a
+  // blind player's first instinct on hearing "It is your turn." is to
+  // Left/Right through their cards to decide what to do before drawing - see
+  // rummyFocusHand()/#rummy-hand's aria-label. Without this, a blind player
+  // never has focus land back in the game table when their turn begins -
+  // they'd hear the turn announcement but have to press F to reach the cards.
+  // This covers hand start too, since beginHand's first emitRummyTurnState
+  // call (games/rummy/index.js) is itself turnPhase 'draw' for whichever
+  // seat goes first.
+  if (payload.turnPlayerId === socket.id && payload.turnPhase === 'draw') {
+    window.requestAnimationFrame(function () {
+      rummyFocusHand();
+    });
   }
 });
 

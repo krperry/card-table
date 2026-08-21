@@ -151,7 +151,15 @@ module.exports = function createRummyGame(deps) {
     const parts = [];
     if (lastEvent) {
       if (lastEvent.type === 'draw' && lastEvent.playerIndex !== recipientIndex) {
-        parts.push(lastEvent.playerName + ' draws from the ' + lastEvent.source + '.');
+        // The stock is face-down - naming the card would leak hidden
+        // information other players aren't supposed to have. The discard
+        // pile is face-up, so that card is fair to announce (everyone could
+        // already see it sitting on top of the pile).
+        if (lastEvent.source === 'discard') {
+          parts.push(lastEvent.playerName + ' takes the ' + rules.cardName(lastEvent.card) + ' from the discard pile.');
+        } else {
+          parts.push(lastEvent.playerName + ' draws from the stack.');
+        }
       } else if (lastEvent.type === 'meld' && lastEvent.playerIndex !== recipientIndex) {
         parts.push(lastEvent.playerName + ' melds a ' + lastEvent.meldType + '.');
       } else if (lastEvent.type === 'layoff' && lastEvent.playerIndex !== recipientIndex) {
@@ -161,8 +169,16 @@ module.exports = function createRummyGame(deps) {
         parts.push(lastEvent.playerName + ' discards ' + rules.cardName(lastEvent.card) + '.');
       }
     }
-    if (recipientIndex === table.game.turnIndex) {
-      parts.push(table.game.turnPhase === 'draw' ? 'Your turn to draw.' : 'Your turn.');
+    // Only announce whose turn it is at the start of a fresh turn (turnPhase
+    // 'draw') - not on every meld/lay-off call within the SAME player's
+    // still-ongoing turn, which would otherwise repeat "Your turn." after
+    // each of their own sub-actions. Firing this for every recipient (not
+    // just the player whose turn it now is) lets a blind player who isn't
+    // up next still hear who they're waiting on.
+    if (table.game.turnPhase === 'draw') {
+      parts.push(recipientIndex === table.game.turnIndex
+        ? 'It is your turn.'
+        : 'It is ' + table.players[table.game.turnIndex].name + '\'s turn.');
     }
     return parts.length ? parts.join(' ') : null;
   }
@@ -337,7 +353,7 @@ module.exports = function createRummyGame(deps) {
     sendHand(table, player, playerIndex);
 
     emitTableState(table);
-    emitRummyTurnState(table, { type: 'draw', playerIndex: playerIndex, playerName: player.name, source: 'discard' });
+    emitRummyTurnState(table, { type: 'draw', playerIndex: playerIndex, playerName: player.name, source: 'discard', card: card });
   }
 
   function performMeldCards(table, actingId, cards) {

@@ -224,3 +224,29 @@ test('the player with the lowest final score wins', () => {
   assert.equal(rules.getWinnerIndex([81, 72, 96, 104]), 1);
   assert.equal(rules.getWinnerIndex([72, 81, 96, 104]), 0);
 });
+
+// --- Hand sorting: Ace high, above King ---------------------------------
+// Hearts is the one game of the three where Ace is HIGH, not low - these
+// tests exist specifically to guard against that rule getting flipped while
+// fixing the shared Ace-low sort logic for Rummy/Cribbage (see
+// games/rummy/rules.js and games/cribbage/rules.js). deal()/applyPass() both
+// route every hand through this same sortHand(), so locking it in here
+// covers "visual/keyboard/screen-reader order must match" for every place a
+// Hearts hand is sorted - there is no separate client-side re-sort the way
+// Rummy/Cribbage offer (hearts-client.js just renders appState.heartsHand in
+// the order the server already sorted it).
+
+test('rankValue orders 2 < 3 < ... < Q < K < A (Ace high)', () => {
+  const ranksInOrder = ['2', '3', '4', '5', '6', '7', '8', '9', 'T', 'J', 'Q', 'K', 'A'];
+  for (let i = 1; i < ranksInOrder.length; i++) {
+    assert.ok(
+      rules.rankValue(ranksInOrder[i - 1] + 'C') < rules.rankValue(ranksInOrder[i] + 'C'),
+      ranksInOrder[i - 1] + ' should sort below ' + ranksInOrder[i]
+    );
+  }
+});
+
+test('sortHand groups by suit and sorts Ace above King within each suit', () => {
+  const sorted = rules.sortHand(['AH', 'KC', '2H', 'QC', 'AC']);
+  assert.deepEqual(sorted, ['QC', 'KC', 'AC', '2H', 'AH']);
+});

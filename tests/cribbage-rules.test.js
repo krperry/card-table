@@ -195,3 +195,36 @@ test('isGameOver/getWinnerIndex: the highest score wins once either score reache
   assert.equal(rules.isGameOver([61, 10], 61), true);
   assert.equal(rules.getWinnerIndex([10, 61]), 1);
 });
+
+// --- Hand sorting: Ace low ---------------------------------------------
+// The client's "sort by value" presentation mode (cribbage-client.js) is
+// re-derived here from the same exported primitives sortHand() uses
+// (rankOrderValue/suitOf), same reasoning as tests/rummy-rules.test.js's
+// sortHandByValue helper - it never touches counting/pegging/scoring, which
+// all read the server's own hand order untouched by either sort mode.
+
+test('rankOrderValue orders A < 2 < 3 < ... < Q < K (Ace low)', () => {
+  const ranksInOrder = ['A', '2', '3', '4', '5', '6', '7', '8', '9', 'T', 'J', 'Q', 'K'];
+  for (let i = 1; i < ranksInOrder.length; i++) {
+    assert.ok(
+      rules.rankOrderValue(ranksInOrder[i - 1] + 'C') < rules.rankOrderValue(ranksInOrder[i] + 'C'),
+      ranksInOrder[i - 1] + ' should sort below ' + ranksInOrder[i]
+    );
+  }
+});
+
+test('sortHand (sort by suit): groups by suit, Ace low within each suit', () => {
+  const sorted = rules.sortHand(['AH', 'KC', '2H', 'QC', 'AC']);
+  assert.deepEqual(sorted, ['AC', 'QC', 'KC', 'AH', '2H']);
+});
+
+test('sort by value: Ace low primarily, suit as tiebreak', () => {
+  const SUIT_SORT_ORDER = { C: 0, D: 1, H: 2, S: 3 };
+  function sortHandByValue(hand) {
+    return hand.slice().sort((a, b) => {
+      const rankDiff = rules.rankOrderValue(a) - rules.rankOrderValue(b);
+      return rankDiff !== 0 ? rankDiff : SUIT_SORT_ORDER[rules.suitOf(a)] - SUIT_SORT_ORDER[rules.suitOf(b)];
+    });
+  }
+  assert.deepEqual(sortHandByValue(['AH', 'KC', '2H', 'QC', 'AC']), ['AC', 'AH', '2H', 'QC', 'KC']);
+});

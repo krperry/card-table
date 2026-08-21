@@ -255,3 +255,63 @@ test('scoreHand counts a Joker left in hand as 15 deadwood', () => {
   assert.deepEqual(result.deadwoodByPlayer, [0, 20]);
   assert.deepEqual(result.pointsAwarded, [20, 0]);
 });
+
+// --- Hand sorting: Ace low, Jokers always last -----------------------------
+// The client offers two presentation sort modes (by suit / by value - see
+// public/games/rummy/rummy-client.js's rummySortCardsBySuit/ByValue), but
+// both must agree on the same underlying ordinal rules this pure module
+// defines: Ace low, and a Joker (no fixed rank/suit) sorts after every real
+// card no matter which mode is active.
+
+test('rankOrderValue orders A < 2 < 3 < ... < Q < K (Ace low)', () => {
+  const ranksInOrder = ['A', '2', '3', '4', '5', '6', '7', '8', '9', 'T', 'J', 'Q', 'K'];
+  for (let i = 1; i < ranksInOrder.length; i++) {
+    assert.ok(
+      rules.rankOrderValue(ranksInOrder[i - 1] + 'C') < rules.rankOrderValue(ranksInOrder[i] + 'C'),
+      ranksInOrder[i - 1] + ' should sort below ' + ranksInOrder[i]
+    );
+  }
+});
+
+test('sortHand (sort by suit): groups by suit, Ace low within each suit', () => {
+  const sorted = rules.sortHand(['AH', 'KC', '2H', 'QC', 'AC']);
+  assert.deepEqual(sorted, ['AC', 'QC', 'KC', 'AH', '2H']);
+});
+
+test('sortHand (sort by suit): every Joker sorts after all suited cards, multiple Jokers stay together', () => {
+  const sorted = rules.sortHand(['1J', '2H', 'KC', 'AH', '2J', 'AC']);
+  assert.deepEqual(sorted, ['AC', 'KC', 'AH', '2H', '1J', '2J']);
+});
+
+// The "sort by value" mode is presentation-only client logic (never
+// server-authoritative - see rummy-client.js's module header), so it isn't
+// exported from this pure module. It's re-derived here from the same
+// exported primitives (rankOrderValue/isJoker/suitOf) the client's
+// rummySortCardsByValue() uses, to lock in the exact ordering the issue
+// spec requires: Ace low, suit as a tiebreaker, Jokers always last.
+function sortHandByValue(hand) {
+  const SUIT_SORT_ORDER = { C: 0, D: 1, H: 2, S: 3 };
+  const JOKER_SORT_VALUE = 14; // sorts after King (13) regardless of rank
+  const JOKER_SUIT_VALUE = 4; // sorts after Spades (3) regardless of suit
+  function rankKey(card) { return rules.isJoker(card) ? JOKER_SORT_VALUE : rules.rankOrderValue(card); }
+  function suitKey(card) { return rules.isJoker(card) ? JOKER_SUIT_VALUE : SUIT_SORT_ORDER[rules.suitOf(card)]; }
+  return hand.slice().sort((a, b) => {
+    const rankDiff = rankKey(a) - rankKey(b);
+    return rankDiff !== 0 ? rankDiff : suitKey(a) - suitKey(b);
+  });
+}
+
+test('sort by value: Ace low primarily, suit as tiebreak', () => {
+  assert.deepEqual(sortHandByValue(['AH', 'KC', '2H', 'QC', 'AC']), ['AC', 'AH', '2H', 'QC', 'KC']);
+});
+
+test('sort by value: every Joker sorts after all ranked cards, multiple Jokers stay together', () => {
+  assert.deepEqual(sortHandByValue(['1J', '2H', 'KC', 'AH', '2J', 'AC']), ['AC', 'AH', '2H', 'KC', '1J', '2J']);
+});
+
+test('card ordering is A < 2 < ... < Q < K < Joker in both sort modes', () => {
+  const bySuit = rules.sortHand(['KC', '1J', 'AC']);
+  assert.deepEqual(bySuit, ['AC', 'KC', '1J']);
+  const byValue = sortHandByValue(['KC', '1J', 'AC']);
+  assert.deepEqual(byValue, ['AC', 'KC', '1J']);
+});

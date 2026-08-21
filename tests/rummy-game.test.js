@@ -477,3 +477,91 @@ test('reconnecting mid-hand-summary migrates the pending ack off the old socket 
     child.kill('SIGTERM');
   }
 });
+
+test('rummyTurnState messages tell a blind player where a draw came from (without revealing a hidden stock card), name a visible discard-pile take, and announce whose turn is next without duplicating it mid-turn', async () => {
+  const port = 3205;
+  const child = startChild(port);
+  const sockets = [];
+
+  try {
+    await waitForServer(child, port);
+    const p1 = await connectAndRegister(port, `rummy-announce-p1-${Date.now()}@example.com`, `RummyAnnounceP1${Date.now()}`);
+    const p2 = await connectAndRegister(port, `rummy-announce-p2-${Date.now()}@example.com`, `RummyAnnounceP2${Date.now()}`);
+    sockets.push(p1.socket, p2.socket);
+
+    const table = await createRummyTable(p1.socket);
+    const joined = waitForEvent(p2.socket, 'tableState', (payload) => payload && payload.table && payload.table.id === table.id, 5000);
+    p2.socket.emit('joinTable', { tableId: table.id });
+    await joined;
+
+    const inGamePromise = waitForEvent(p1.socket, 'tableState', (payload) => payload && payload.table && payload.table.status === 'in_game', 5000);
+    p1.socket.emit('startGame');
+    const inGameTable = (await inGamePromise).table;
+
+    const p1Index = inGameTable.players.findIndex((player) => player.id === p1.socket.id);
+    const p2Index = 1 - p1Index;
+
+    const hands = [[], []];
+    hands[p1Index] = ['7C', '7D', '7H', '8S', '9S'];
+    hands[p2Index] = ['2C', '3C', '4C'];
+
+    const p1ReadyPromise = waitForEvent(p1.socket, 'rummyTurnState', (payload) => payload.turnPhase === 'draw' && payload.turnPlayerId === p1.socket.id, 5000);
+    const p2ReadyPromise = waitForEvent(p2.socket, 'rummyTurnState', (payload) => payload.turnPhase === 'draw' && payload.turnPlayerId === p1.socket.id, 5000);
+    p1.socket.emit('__testSetTableState', {
+      tableId: table.id,
+      game: {
+        phase: 'playing',
+        turnIndex: p1Index,
+        turnPhase: 'draw',
+        dealerIndex: p2Index,
+        hands: hands,
+        stock: ['5D', '6D'],
+        discardPile: ['9S'],
+        melds: [[], []]
+      },
+      emitRummyTurnState: true
+    });
+    const p1ReadyMessage = (await p1ReadyPromise).message;
+    const p2ReadyMessage = (await p2ReadyPromise).message;
+    assert.equal(p1ReadyMessage, 'It is your turn.');
+    assert.equal(p2ReadyMessage, "It is " + p1.payload.name + "'s turn.");
+
+    // p1 draws from the face-down stock: p2 should hear where it came from,
+    // but never the identity of a card only p1 can see.
+    const p2SeesStockDrawPromise = waitForEvent(p2.socket, 'rummyTurnState', (payload) => payload.turnPhase === 'action', 5000);
+    const p1DrawResultPromise = waitForEvent(p1.socket, 'rummyDrawResult', () => true, 5000);
+    p1.socket.emit('rummyDrawStock');
+    const p1DrawResult = await p1DrawResultPromise;
+    assert.equal(p1DrawResult.card, '6D');
+    const p2SeesStockDraw = await p2SeesStockDrawPromise;
+    assert.equal(p2SeesStockDraw.message, p1.payload.name + ' draws from the stack.');
+    assert.ok(!p2SeesStockDraw.message.includes('6D'));
+    assert.ok(!/Six of Diamonds/i.test(p2SeesStockDraw.message));
+
+    // p1 discards - this both ends p1's turn (should NOT re-announce "Your
+    // turn" to p1 for their own earlier draw) and hands play to p2, so both
+    // players should be told whose turn is next.
+    const p1SeesOwnDiscardTurnPromise = waitForEvent(p1.socket, 'rummyTurnState', (payload) => payload.turnPhase === 'draw' && payload.turnPlayerId === p2.socket.id, 5000);
+    const p2SeesDiscardAndOwnTurnPromise = waitForEvent(p2.socket, 'rummyTurnState', (payload) => payload.turnPhase === 'draw' && payload.turnPlayerId === p2.socket.id, 5000);
+    const discardResultPromise = waitForEvent(p1.socket, 'rummyDiscardResult', () => true, 5000);
+    p1.socket.emit('rummyDiscardCard', { card: '9S' });
+    await discardResultPromise;
+    const p1SeesOwnDiscardTurn = await p1SeesOwnDiscardTurnPromise;
+    const p2SeesDiscardAndOwnTurn = await p2SeesDiscardAndOwnTurnPromise;
+    assert.equal(p1SeesOwnDiscardTurn.message, 'It is ' + p2.payload.name + "'s turn.");
+    assert.equal(p2SeesDiscardAndOwnTurn.message, p1.payload.name + ' discards Nine of Spades. It is your turn.');
+
+    // p2 takes the visible discard: p1 should hear which card, since the
+    // discard pile is public information.
+    const p1SeesDiscardTakePromise = waitForEvent(p1.socket, 'rummyTurnState', (payload) => payload.turnPhase === 'action', 5000);
+    const p2DrawResultPromise = waitForEvent(p2.socket, 'rummyDrawResult', () => true, 5000);
+    p2.socket.emit('rummyDrawDiscard');
+    const p2DrawResult = await p2DrawResultPromise;
+    assert.equal(p2DrawResult.card, '9S');
+    const p1SeesDiscardTake = await p1SeesDiscardTakePromise;
+    assert.equal(p1SeesDiscardTake.message, p2.payload.name + ' takes the Nine of Spades from the discard pile.');
+  } finally {
+    sockets.forEach((socket) => { if (socket.connected) socket.disconnect(); });
+    child.kill('SIGTERM');
+  }
+});
