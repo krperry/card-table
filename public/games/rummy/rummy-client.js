@@ -56,7 +56,10 @@ Object.assign(appState, {
   rummyHandButtonsHandKey: null,
   // Player-hand presentation preference only - never consulted by
   // server-authoritative meld/lay-off/discard logic. See rummyDisplayHand().
-  rummySortMode: 'value'
+  rummySortMode: 'value',
+  // Sighted-only display preference for the meld board's card-image size.
+  // See renderRummyMeldBoard()/rummyToggleMeldSize().
+  rummyMeldsEnlarged: false
 });
 
 function rummyCardRank(card) {
@@ -251,11 +254,108 @@ function rummyMeldGroupLabel(group) {
   return 'Run: ' + ranks + ' of ' + suit + jokerNote;
 }
 
+// --- Meld card visuals (sighted-only; derived from the same group data the
+// accessible label above is built from - see rummyMeldGroupLabel()) --------
+// These never independently decide what a meld "is"; they only choose a
+// display ORDER for the group's existing cards.cards array, replicating
+// (not re-implementing) games/rummy/rules.js's Joker gap-filling logic so a
+// Joker renders in the run position it's actually covering. Real rule
+// validation and meld/lay-off legality stay entirely server-side.
+
+// Same leftover-Joker "extend low end first, then high end" convention as
+// games/rummy/rules.js's runEffectiveBounds()/this file's own
+// rummyRunEffectiveBounds() above - kept as a separate function (rather than
+// reusing those) because this one needs to return the actual per-position
+// cards, not just the resulting min/max bounds.
+function rummyBuildRunDisplayCards(cards) {
+  const jokerPool = cards.filter(rummyIsJoker).slice();
+  const realCards = cards.filter(function (card) { return !rummyIsJoker(card); });
+  if (!realCards.length) {
+    return cards.slice();
+  }
+
+  const byRankOrder = {};
+  realCards.forEach(function (card) { byRankOrder[rummyRankOrderValue(card)] = card; });
+  const values = realCards.map(rummyRankOrderValue);
+  let min = Math.min.apply(null, values);
+  let max = Math.max.apply(null, values);
+
+  const result = [];
+  for (let value = min; value <= max; value++) {
+    if (byRankOrder[value]) {
+      result.push(byRankOrder[value]);
+    } else if (jokerPool.length) {
+      result.push(jokerPool.shift());
+    }
+  }
+
+  while (jokerPool.length) {
+    if (min > 1) {
+      min--;
+      result.unshift(jokerPool.shift());
+    } else if (max < 13) {
+      max++;
+      result.push(jokerPool.shift());
+    } else {
+      // Shouldn't happen for an already-valid run (see isValidRun()'s
+      // roomBelow/roomAbove check server-side), but avoid an infinite loop.
+      break;
+    }
+  }
+
+  return result;
+}
+
+function rummyBuildSetDisplayCards(cards) {
+  const realCards = cards.filter(function (card) { return !rummyIsJoker(card); })
+    .slice()
+    .sort(function (a, b) { return rummySortSuitValue(a) - rummySortSuitValue(b); });
+  const jokers = cards.filter(rummyIsJoker);
+  return realCards.concat(jokers);
+}
+
+function rummyBuildMeldDisplayCards(group) {
+  if (!group || !Array.isArray(group.cards) || !group.cards.length) {
+    return [];
+  }
+  return group.type === 'run' ? rummyBuildRunDisplayCards(group.cards) : rummyBuildSetDisplayCards(group.cards);
+}
+
+// aria-hidden: the visually-hidden label built in renderRummyMeldBoard()
+// already carries this same information to assistive tech (and to srSpeak
+// via the existing 1-6/Review-melds flow) - this row must never be announced
+// on its own, or a screen reader user would hear every meld twice. Clickable
+// (mouse/touch only, same target-seat action as the Review melds button) but
+// deliberately not given a tabindex, since interactive content shouldn't
+// also be aria-hidden for keyboard/AT users - the Review melds button
+// remains the keyboard/AT path to the same action.
+function rummyBuildMeldCardsElement(group, seatIndex) {
+  const wrap = document.createElement('div');
+  wrap.className = 'rummy-meld-cards';
+  wrap.setAttribute('aria-hidden', 'true');
+  rummyBuildMeldDisplayCards(group).forEach(function (card, index) {
+    const img = document.createElement('img');
+    img.className = 'rummy-meld-card-img' + (index > 0 ? ' rummy-meld-card-img-overlap' : '');
+    img.src = rummyCardImageSrc(card);
+    img.alt = '';
+    wrap.appendChild(img);
+  });
+  bindPressNoFocus(wrap, function () { rummyReviewSeatMelds(seatIndex); });
+  return wrap;
+}
+
 function renderRummyMeldBoard() {
   const board = document.getElementById('rummy-meld-board');
   if (!board || !appState.currentTable || !Array.isArray(appState.currentTable.players)) {
     return;
   }
+
+  const sizeToggleBtn = document.getElementById('rummy-meld-size-toggle-btn');
+  if (sizeToggleBtn) {
+    sizeToggleBtn.textContent = appState.rummyMeldsEnlarged ? 'Shrink Melds' : 'Enlarge Melds';
+    sizeToggleBtn.setAttribute('aria-pressed', appState.rummyMeldsEnlarged ? 'true' : 'false');
+  }
+  board.classList.toggle('rummy-melds-enlarged', !!appState.rummyMeldsEnlarged);
 
   board.innerHTML = '';
   appState.currentTable.players.forEach(function (player, seatIndex) {
@@ -285,7 +385,17 @@ function renderRummyMeldBoard() {
       groups.forEach(function (group) {
         const li = document.createElement('li');
         li.className = 'rummy-meld-group';
-        li.textContent = rummyMeldGroupLabel(group);
+
+        // Accessible text description - kept off-screen (not display:none,
+        // so it stays reachable by a screen reader's browse-mode cursor as
+        // well as via srSpeak) rather than removed, per the requirement that
+        // blind players see no change to the existing meld description.
+        const label = document.createElement('span');
+        label.className = 'visually-hidden';
+        label.textContent = rummyMeldGroupLabel(group);
+        li.appendChild(label);
+
+        li.appendChild(rummyBuildMeldCardsElement(group, seatIndex));
         list.appendChild(li);
       });
     }
@@ -434,6 +544,15 @@ function renderRummySortControl() {
   }
 
   button.textContent = appState.rummySortMode === 'value' ? 'By suit' : 'By order';
+}
+
+// Sighted-only convenience for low-vision players - purely a display-size
+// toggle on the meld card images (see .rummy-melds-enlarged in style.css).
+// Does not affect the accessible text label, hotkeys, or any server state.
+function rummyToggleMeldSize() {
+  appState.rummyMeldsEnlarged = !appState.rummyMeldsEnlarged;
+  renderRummyMeldBoard();
+  srSpeak(appState.rummyMeldsEnlarged ? 'Melds enlarged.' : 'Melds back to default size.', 'polite', { canInterruptLock: true });
 }
 
 function rummyToggleSortMode() {
@@ -1054,6 +1173,7 @@ socket.on('rummyGameOver', function (payload) {
 
 function rummyBindControls() {
   bindPress(document.getElementById('rummy-sort-toggle-btn'), rummyToggleSortMode);
+  bindPress(document.getElementById('rummy-meld-size-toggle-btn'), rummyToggleMeldSize);
   bindPress(document.getElementById('rummy-draw-stock-btn'), rummyAttemptDrawStock);
   bindPress(document.getElementById('rummy-draw-discard-btn'), rummyAttemptDrawDiscard);
   bindPress(document.getElementById('rummy-meld-btn'), rummyCommitMeld);

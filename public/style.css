@@ -1416,6 +1416,29 @@ canvas {
   outline-offset: 1px;
 }
 
+.rummy-meld-board-controls {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 6px;
+}
+
+.rummy-meld-board-controls button {
+  background: #fff;
+  color: #123b39;
+  border: 2px solid #a7bdb7;
+  border-radius: 8px;
+  padding: 4px 10px;
+  font-size: 0.85em;
+  font-weight: 600;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.rummy-meld-board-controls button:focus-visible {
+  outline: 3px solid #0d7c67;
+  outline-offset: 1px;
+}
+
 .rummy-meld-group-list {
   list-style: none;
   margin: 8px 0 0;
@@ -1423,13 +1446,58 @@ canvas {
 }
 
 .rummy-meld-group-list li {
-  margin: 4px 0;
+  margin: 0 0 10px;
   font-size: 13px;
   color: #234544;
 }
 
+.rummy-meld-group-list li:last-child {
+  margin-bottom: 0;
+}
+
 .rummy-meld-group {
   font-weight: 700;
+}
+
+/* Visual card representation of a meld group - a sighted-only companion to
+   the visually-hidden text label rendered just before it in the DOM (see
+   renderRummyMeldBoard() in rummy-client.js). aria-hidden because the label
+   already carries the same information to assistive tech via the DOM and via
+   srSpeak on the existing 1-6/Review-melds interactions - this row must never
+   be independently announced. Clickable for mouse/touch (sets this seat as
+   the lay-off target, same as the Review melds button / a 1-6 keypress) but
+   not part of the tab order, since aria-hidden content shouldn't receive
+   keyboard focus. */
+.rummy-meld-cards {
+  display: flex;
+  align-items: flex-end;
+  overflow-x: auto;
+  overflow-y: hidden;
+  max-width: 100%;
+  padding: 2px 2px 6px;
+  cursor: pointer;
+}
+
+.rummy-meld-card-img {
+  flex: 0 0 auto;
+  width: 34px;
+  height: auto;
+  border-radius: 4px;
+  border: 1px solid #a7bdb7;
+  background: #fff;
+  box-shadow: 1px 0 2px rgba(0, 0, 0, 0.15);
+}
+
+.rummy-meld-card-img.rummy-meld-card-img-overlap {
+  margin-left: -20px;
+}
+
+.rummy-meld-board.rummy-melds-enlarged .rummy-meld-card-img {
+  width: 58px;
+}
+
+.rummy-meld-board.rummy-melds-enlarged .rummy-meld-card-img.rummy-meld-card-img-overlap {
+  margin-left: -32px;
 }
 
 .rummy-section {

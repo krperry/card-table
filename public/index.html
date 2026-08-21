@@ -363,6 +363,9 @@
             </div>
           </div>
 
+          <div class="rummy-meld-board-controls">
+            <button id="rummy-meld-size-toggle-btn" type="button">Enlarge Melds</button>
+          </div>
           <div id="rummy-meld-board" class="rummy-meld-board" aria-label="Melds on the table"></div>
 
           <div id="rummy-controls" class="rummy-controls">
@@ -489,6 +492,8 @@
           <li>L: lay off the marked cards, or - if nothing is marked - the focused card, onto the meld target most recently reviewed with a 1-6 key press, provided it's a legal extension</li>
           <li>Unmark All (button, next to the other action buttons), or U: unmark all currently marked cards</li>
           <li>1-6: announce seat N's melds and set seat N as the lay-off target for L (works any time, not just your turn - reviewing your own seat's melds is allowed too)</li>
+          <li>Melds on the table are also shown as card images next to each seat's name for sighted players (click a seat's meld cards, or the Review melds button, to set that seat as the lay-off target); this is a visual aid only and doesn't change what's announced</li>
+          <li>Enlarge Melds / Shrink Melds (button, above the melds board): make the meld card images bigger or return them to the default compact size</li>
           <li>D: draw from the stock (your turn, before acting)</li>
           <li>W: draw from the discard pile (your turn, before acting)</li>
           <li>Sort cards by (button, above your hand), or G: switch your hand between sorting by card value and by suit</li>
