@@ -1480,7 +1480,7 @@ canvas {
 
 .rummy-meld-card-img {
   flex: 0 0 auto;
-  width: 34px;
+  width: 68px;
   height: auto;
   border-radius: 4px;
   border: 1px solid #a7bdb7;
@@ -1489,15 +1489,15 @@ canvas {
 }
 
 .rummy-meld-card-img.rummy-meld-card-img-overlap {
-  margin-left: -20px;
+  margin-left: -40px;
 }
 
 .rummy-meld-board.rummy-melds-enlarged .rummy-meld-card-img {
-  width: 58px;
+  width: 116px;
 }
 
 .rummy-meld-board.rummy-melds-enlarged .rummy-meld-card-img.rummy-meld-card-img-overlap {
-  margin-left: -32px;
+  margin-left: -64px;
 }
 
 .rummy-section {

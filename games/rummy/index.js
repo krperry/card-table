@@ -310,7 +310,7 @@ module.exports = function createRummyGame(deps) {
       return;
     }
 
-    const decision = bots.chooseMeldsAndLayoffs(table.game.hands[playerIndex], table.game.melds);
+    const decision = bots.chooseMeldsAndLayoffs(table.game.hands[playerIndex], table.game.melds, playerIndex);
     for (let i = 0; i < decision.melds.length; i++) {
       if (!stillBotsTurn(table, playerIndex)) {
         return;

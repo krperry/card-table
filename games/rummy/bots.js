@@ -36,17 +36,30 @@ function chooseDrawSource(hand, topDiscard) {
   return 'stock';
 }
 
-// Greedily melds every obvious set/run sitting in hand, then lays off any
-// remaining card that fits an existing meld group (on any seat, including
-// the bot's own melds from earlier this turn). No sequencing optimization,
-// no holding back for strategic reasons - see this module's header comment.
-function chooseMeldsAndLayoffs(hand, allMelds) {
+// Greedily melds every obvious set/run sitting in hand (including
+// Joker-assisted ones - see the "Joker-assisted melds" block below), then
+// lays off any remaining card that fits an existing meld group (on any
+// seat, including the bot's own melds from earlier this turn). No
+// sequencing optimization, no holding back for strategic reasons - see this
+// module's header comment. `ownSeatIndex` (this bot's own seat index into
+// `allMelds`) is used only to prefer the bot's own board over an opponent's
+// when a spare Joker has nowhere better to go - see the lay-off block below.
+function chooseMeldsAndLayoffs(hand, allMelds, ownSeatIndex) {
   const remaining = hand.slice();
   const melds = [];
 
-  // Sets first: any rank held 3+ times.
+  // Sets first: any REAL rank held 3+ times. Jokers are deliberately
+  // excluded from this grouping (not just from the resulting melds): a
+  // Joker card's first character ("1J"/"2J") happens to collide with the
+  // real rank chars "1"/"2" (see rules.js's JOKER_CARDS), so grouping by a
+  // raw rankOf() would occasionally sweep a Joker into a "real" 2-set by
+  // accident, before the intentional Joker-assisted pass below ever gets a
+  // say in it.
   const byRank = {};
   remaining.forEach(function (card) {
+    if (rules.isJoker(card)) {
+      return;
+    }
     const rank = rules.rankOf(card);
     (byRank[rank] = byRank[rank] || []).push(card);
   });
@@ -91,39 +104,130 @@ function chooseMeldsAndLayoffs(hand, allMelds) {
     }
   });
 
+  // Joker-assisted melds: a Joker exists to make a meld the player couldn't
+  // otherwise complete (see public/rummy-rules.md) - spending it on the
+  // bot's OWN near-complete set/run here, before the lay-off pass below
+  // ever gets a chance to hand it to another seat's board, is the whole
+  // fix for "the bot dumps its Joker on someone else's meld." Only reached
+  // once every real-card-only set/run above has already been grabbed, so a
+  // Joker is used here only when it's actually needed - never in place of
+  // a run/set the hand could already make on its own.
+  //
+  // Sets: a real rank still held exactly twice, filled out to 3 by one
+  // spare Joker.
+  Object.keys(byRank).forEach(function (rank) {
+    if (!remaining.some(rules.isJoker)) {
+      return;
+    }
+    const cards = byRank[rank].filter(function (card) { return remaining.indexOf(card) !== -1; });
+    if (cards.length === 2) {
+      const joker = remaining.find(rules.isJoker);
+      const group = cards.concat([joker]);
+      if (rules.isValidSet(group)) {
+        melds.push(group);
+        group.forEach(function (card) {
+          const index = remaining.indexOf(card);
+          if (index !== -1) {
+            remaining.splice(index, 1);
+          }
+        });
+      }
+    }
+  });
+
+  // Runs: two consecutive same-suit cards left over from the real-run pass,
+  // extended to a run of 3 by one spare Joker (filling the gap or extending
+  // past either end - both are valid per rules.isValidRun()).
+  rules.SUITS.forEach(function (suit) {
+    if (!remaining.some(rules.isJoker)) {
+      return;
+    }
+    const suitCards = remaining
+      .filter(function (card) { return rules.suitOf(card) === suit; })
+      .sort(function (a, b) { return rules.rankOrderValue(a) - rules.rankOrderValue(b); });
+
+    let i = 0;
+    while (i + 1 < suitCards.length) {
+      if (!remaining.some(rules.isJoker)) {
+        break;
+      }
+      if (rules.rankOrderValue(suitCards[i + 1]) === rules.rankOrderValue(suitCards[i]) + 1) {
+        const joker = remaining.find(rules.isJoker);
+        const group = [suitCards[i], suitCards[i + 1], joker];
+        if (rules.isValidRun(group)) {
+          melds.push(group);
+          group.forEach(function (card) {
+            const index = remaining.indexOf(card);
+            if (index !== -1) {
+              remaining.splice(index, 1);
+            }
+          });
+          i += 2;
+          continue;
+        }
+      }
+      i++;
+    }
+  });
+
   // Lay-offs: simulate each target seat's groups (copying so we can extend
   // them locally as we go, letting a second card stack onto a group the
   // first lay-off just grew) and attach any remaining hand card that fits.
+  // Real cards are tried first, across all seats, in seat order; any
+  // Jokers still left over (with no home in the bot's own hand per the
+  // pass above) are held back for a second pass, and within that second
+  // pass the bot's own seat (ownSeatIndex) is checked before anyone
+  // else's - a spare Joker should shore up the bot's own board before it
+  // goes to help an opponent's.
   const simulatedMelds = (allMelds || []).map(function (seatGroups) {
     return (seatGroups || []).map(function (group) {
       return { type: group.type, cards: group.cards.slice() };
     });
   });
 
+  const seatOrder = simulatedMelds.map(function (_, index) { return index; });
+  if (typeof ownSeatIndex === 'number') {
+    seatOrder.sort(function (a, b) {
+      if (a === ownSeatIndex) return -1;
+      if (b === ownSeatIndex) return 1;
+      return 0;
+    });
+  }
+
   const layoffs = [];
-  let progressed = true;
-  while (progressed) {
-    progressed = false;
-    for (let i = 0; i < remaining.length; i++) {
-      const card = remaining[i];
-      let attached = false;
-      for (let seatIndex = 0; seatIndex < simulatedMelds.length && !attached; seatIndex++) {
+
+  // Tries to attach the first candidate card (in order) that fits some
+  // seat's group; returns true and mutates `remaining`/`layoffs` on
+  // success, false once none of the candidates fit anywhere.
+  function attachOneCard(candidateCards) {
+    for (let i = 0; i < candidateCards.length; i++) {
+      const card = candidateCards[i];
+      for (let s = 0; s < seatOrder.length; s++) {
+        const seatIndex = seatOrder[s];
         const groups = simulatedMelds[seatIndex];
         for (let g = 0; g < groups.length; g++) {
           if (rules.canExtendMeld(groups[g], card)) {
             groups[g].cards.push(card);
             layoffs.push({ targetPlayerIndex: seatIndex, cards: [card] });
-            remaining.splice(i, 1);
-            attached = true;
-            progressed = true;
-            break;
+            const index = remaining.indexOf(card);
+            if (index !== -1) {
+              remaining.splice(index, 1);
+            }
+            return true;
           }
         }
       }
-      if (attached) {
-        break;
-      }
     }
+    return false;
+  }
+
+  let progressed = true;
+  while (progressed) {
+    progressed = attachOneCard(remaining.filter(function (card) { return !rules.isJoker(card); }));
+  }
+  progressed = true;
+  while (progressed) {
+    progressed = attachOneCard(remaining.filter(rules.isJoker));
   }
 
   return { melds: melds, layoffs: layoffs };
