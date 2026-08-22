@@ -54,15 +54,35 @@ module.exports = function createRummyGame(deps) {
 
   function normalizeMatchSettings(payload) {
     return {
-      targetScore: clampInteger(payload && payload.rummyTargetScore, MIN_TARGET_SCORE, MAX_TARGET_SCORE, DEFAULT_TARGET_SCORE)
+      targetScore: clampInteger(payload && payload.rummyTargetScore, MIN_TARGET_SCORE, MAX_TARGET_SCORE, DEFAULT_TARGET_SCORE),
+      // Both optional table rules default OFF, following the same
+      // "!!payload.field" convention games/lumo/index.js uses for
+      // allowDrawTwoStacking/allowWildDrawFourStacking - a table only opts in
+      // when the host explicitly checks the box (see public/index.html's
+      // rummy-table-settings and public/main.js's createTable()).
+      allowDrawEntirePile: !!(payload && payload.rummyAllowDrawEntirePile),
+      aceHighOrLow: !!(payload && payload.rummyAceHighOrLow)
     };
   }
 
   function getMatchSettings(table) {
     const matchSettings = table && table.matchSettings ? table.matchSettings : {};
     return {
-      targetScore: clampInteger(matchSettings.targetScore, MIN_TARGET_SCORE, MAX_TARGET_SCORE, DEFAULT_TARGET_SCORE)
+      targetScore: clampInteger(matchSettings.targetScore, MIN_TARGET_SCORE, MAX_TARGET_SCORE, DEFAULT_TARGET_SCORE),
+      allowDrawEntirePile: !!matchSettings.allowDrawEntirePile,
+      aceHighOrLow: !!matchSettings.aceHighOrLow
     };
+  }
+
+  // The subset of match settings games/rummy/rules.js's Ace-High-or-Low-aware
+  // functions (isValidRun/classifyMeld/canExtendMeld/findJokerSwapTarget/
+  // findBestJokerAssignment/cardValue/scoreHand) accept as their trailing
+  // `options` argument - kept as its own tiny helper so every call site below
+  // (and games/rummy/bots.js, which receives the same shape via
+  // runBotTurn()'s botContext) builds it identically from one source of
+  // truth, table.matchSettings, rather than each guessing at the field name.
+  function rulesOptions(table) {
+    return { aceHighOrLow: getMatchSettings(table).aceHighOrLow };
   }
 
   function initializeGameState(table) {
@@ -160,7 +180,9 @@ module.exports = function createRummyGame(deps) {
         // information other players aren't supposed to have. The discard
         // pile is face-up, so that card is fair to announce (everyone could
         // already see it sitting on top of the pile).
-        if (lastEvent.source === 'discard') {
+        if (lastEvent.source === 'pile') {
+          parts.push(lastEvent.playerName + ' draws the discard pile.');
+        } else if (lastEvent.source === 'discard') {
           parts.push(lastEvent.playerName + ' takes the ' + rules.cardName(lastEvent.card) + ' from the discard pile.');
         } else {
           parts.push(lastEvent.playerName + ' draws from the stack.');
@@ -299,9 +321,19 @@ module.exports = function createRummyGame(deps) {
       return;
     }
 
+    const options = rulesOptions(table);
+    const matchSettings = getMatchSettings(table);
     const topDiscard = table.game.discardPile.length ? table.game.discardPile[table.game.discardPile.length - 1] : null;
-    const source = bots.chooseDrawSource(table.game.hands[playerIndex], topDiscard);
-    if (source === 'discard' && topDiscard) {
+    const source = bots.chooseDrawAction(
+      table.game.hands[playerIndex],
+      topDiscard,
+      table.game.discardPile,
+      table.game.melds,
+      { allowDrawEntirePile: matchSettings.allowDrawEntirePile, rulesOptions: options }
+    );
+    if (source === 'pile' && matchSettings.allowDrawEntirePile && table.game.discardPile.length) {
+      performDrawEntirePile(table, botId);
+    } else if (source === 'discard' && topDiscard) {
       performDrawDiscard(table, botId);
     } else {
       performDrawStock(table, botId);
@@ -317,7 +349,10 @@ module.exports = function createRummyGame(deps) {
     const opponentHandSizes = table.game.hands
       .filter(function (_, index) { return index !== playerIndex; })
       .map(function (opponentHand) { return opponentHand.length; });
-    const botContext = { minOpponentHandSize: opponentHandSizes.length ? Math.min.apply(null, opponentHandSizes) : null };
+    const botContext = {
+      minOpponentHandSize: opponentHandSizes.length ? Math.min.apply(null, opponentHandSizes) : null,
+      rulesOptions: options
+    };
 
     const decision = bots.chooseMeldsAndLayoffs(table.game.hands[playerIndex], table.game.melds, playerIndex, botContext);
     for (let i = 0; i < decision.melds.length; i++) {
@@ -339,7 +374,7 @@ module.exports = function createRummyGame(deps) {
       return;
     }
 
-    const discardCard = bots.chooseDiscard(table.game.hands[playerIndex]);
+    const discardCard = bots.chooseDiscard(table.game.hands[playerIndex], options);
     if (discardCard) {
       performDiscardCard(table, botId, discardCard);
     }
@@ -421,6 +456,51 @@ module.exports = function createRummyGame(deps) {
     queueRummyTurnEvent(table, { type: 'draw', playerIndex: playerIndex, playerName: player.name, source: 'discard', card: card });
   }
 
+  // Optional table rule (matchSettings.allowDrawEntirePile, off by default -
+  // see normalizeMatchSettings()): instead of taking just the top discard,
+  // the whole discard pile goes into the drawing player's hand as-is - no
+  // auto-melding, just like a normal draw, the pile's cards simply become
+  // part of the hand for the player to sort/select/meld/discard afterward.
+  // Counts as this turn's draw exactly like performDrawStock()/
+  // performDrawDiscard() (turnPhase moves to 'action', no second draw
+  // allowed), and shares every one of their same-shaped turn/phase guards.
+  function performDrawEntirePile(table, actingId) {
+    if (!table || table.status !== 'in_game' || !table.game || table.game.phase !== 'playing') {
+      io.to(actingId).emit('rummyDrawResult', { success: false, message: 'Unable to draw right now' });
+      return;
+    }
+    const playerIndex = getPlayerIndex(table, actingId);
+    if (playerIndex !== table.game.turnIndex) {
+      io.to(actingId).emit('rummyDrawResult', { success: false, message: 'It is not your turn' });
+      return;
+    }
+    if (table.game.turnPhase !== 'draw') {
+      io.to(actingId).emit('rummyDrawResult', { success: false, message: 'You have already drawn this turn' });
+      return;
+    }
+    if (!getMatchSettings(table).allowDrawEntirePile) {
+      io.to(actingId).emit('rummyDrawResult', { success: false, message: 'Taking the entire discard pile is not allowed at this table' });
+      return;
+    }
+    if (!table.game.discardPile.length) {
+      io.to(actingId).emit('rummyDrawResult', { success: false, message: 'The discard pile is empty' });
+      return;
+    }
+
+    const takenCards = table.game.discardPile.slice();
+    table.game.discardPile = [];
+    const hand = table.game.hands[playerIndex];
+    takenCards.forEach(function (card) { hand.push(card); });
+    table.game.turnPhase = 'action';
+
+    const player = table.players[playerIndex];
+    io.to(actingId).emit('rummyDrawResult', { success: true, source: 'pile', cards: takenCards, message: '' });
+    sendHand(table, player, playerIndex);
+
+    emitTableState(table);
+    queueRummyTurnEvent(table, { type: 'draw', playerIndex: playerIndex, playerName: player.name, source: 'pile', count: takenCards.length });
+  }
+
   function performMeldCards(table, actingId, cards) {
     if (!table || table.status !== 'in_game' || !table.game || table.game.phase !== 'playing') {
       io.to(actingId).emit('rummyMeldResult', { success: false, message: 'Unable to meld right now' });
@@ -442,7 +522,7 @@ module.exports = function createRummyGame(deps) {
       return;
     }
 
-    const classification = rules.classifyMeld(cards);
+    const classification = rules.classifyMeld(cards, rulesOptions(table));
     if (!classification.valid) {
       io.to(actingId).emit('rummyMeldResult', { success: false, message: 'Those cards do not form a valid set or run' });
       return;
@@ -516,6 +596,7 @@ module.exports = function createRummyGame(deps) {
     //     of what's left also lets a batch spanning more than one of the
     //     target's groups (e.g. some cards for a run, others for a set)
     //     resolve correctly.
+    const options = rulesOptions(table);
     const simulatedGroups = targetGroups.map(function (group) { return { type: group.type, cards: group.cards.slice() }; });
     const assignments = [];
     let remainingCards = cards.slice();
@@ -523,7 +604,7 @@ module.exports = function createRummyGame(deps) {
     for (let i = remainingCards.length - 1; i >= 0; i--) {
       const card = remainingCards[i];
       for (let g = 0; g < simulatedGroups.length; g++) {
-        const swapJoker = rules.findJokerSwapTarget(simulatedGroups[g], card);
+        const swapJoker = rules.findJokerSwapTarget(simulatedGroups[g], card, options);
         if (swapJoker) {
           simulatedGroups[g].cards.splice(simulatedGroups[g].cards.indexOf(swapJoker), 1);
           simulatedGroups[g].cards.push(card);
@@ -538,7 +619,7 @@ module.exports = function createRummyGame(deps) {
       let bestGroupIndex = -1;
       let bestAssignment = null;
       for (let g = 0; g < simulatedGroups.length; g++) {
-        const assignment = rules.findBestJokerAssignment(simulatedGroups[g], remainingCards);
+        const assignment = rules.findBestJokerAssignment(simulatedGroups[g], remainingCards, options);
         if (assignment.cards.length && (!bestAssignment || assignment.cards.length > bestAssignment.cards.length)) {
           bestAssignment = assignment;
           bestGroupIndex = g;
@@ -625,7 +706,7 @@ module.exports = function createRummyGame(deps) {
 
   function finishHand(table, wentOutPlayerIndex) {
     const settings = getMatchSettings(table);
-    const result = rules.scoreHand(table.game.hands, wentOutPlayerIndex);
+    const result = rules.scoreHand(table.game.hands, wentOutPlayerIndex, rulesOptions(table));
 
     table.players.forEach(function (player, index) {
       table.scores[player.name] = (table.scores[player.name] || 0) + result.pointsAwarded[index];
@@ -688,6 +769,7 @@ module.exports = function createRummyGame(deps) {
   }
 
   function endHandNoWinner(table, message) {
+    const options = rulesOptions(table);
     io.to(table.id).emit('rummyHandSummary', {
       handNumber: table.game.handNumber,
       wentOutPlayerName: null,
@@ -695,7 +777,7 @@ module.exports = function createRummyGame(deps) {
       rows: table.players.map(function (player, index) {
         return {
           name: player.name,
-          deadwood: table.game.hands[index].reduce(function (sum, c) { return sum + rules.cardValue(c); }, 0),
+          deadwood: table.game.hands[index].reduce(function (sum, c) { return sum + rules.cardValue(c, options); }, 0),
           pointsAwarded: 0,
           total: table.scores[player.name] || 0
         };
@@ -887,6 +969,14 @@ module.exports = function createRummyGame(deps) {
         return;
       }
       performDrawDiscard(table, socket.id);
+    });
+
+    socket.on('rummyDrawDiscardPile', function () {
+      const table = findTableBySocket(socket);
+      if (!table || table.gameType !== 'rummy') {
+        return;
+      }
+      performDrawEntirePile(table, socket.id);
     });
 
     socket.on('rummyMeldCards', function (payload) {

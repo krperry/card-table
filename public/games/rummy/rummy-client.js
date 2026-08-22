@@ -680,6 +680,17 @@ function rummyAttemptDrawDiscard() {
   socket.emit('rummyDrawDiscard');
 }
 
+// Same underlying action for both the Draw Pile button and the E shortcut
+// (see handleRummyKeys() below and rummyBindControls()) - server-authoritative,
+// same as every other Rummy action here: no client-side legality pre-check,
+// the server responds with a rummyDrawResult either way, giving accessible
+// feedback via srSpeak (see that socket handler further down) when the
+// action isn't currently available (wrong turn/phase, option off, or the
+// pile is empty).
+function rummyAttemptDrawPile() {
+  socket.emit('rummyDrawDiscardPile');
+}
+
 function rummyAttemptDiscard(card) {
   // Server-authoritative (see games/rummy/index.js's module header comment) -
   // no local legality pre-check here, matching every other game client's
@@ -887,6 +898,7 @@ function renderRummyControlButtons() {
 
   const drawStockBtn = document.getElementById('rummy-draw-stock-btn');
   const drawDiscardBtn = document.getElementById('rummy-draw-discard-btn');
+  const drawPileBtn = document.getElementById('rummy-draw-pile-btn');
   const meldBtn = document.getElementById('rummy-meld-btn');
   const layoffBtn = document.getElementById('rummy-layoff-btn');
   const discardBtn = document.getElementById('rummy-discard-btn');
@@ -897,6 +909,16 @@ function renderRummyControlButtons() {
   }
   if (drawDiscardBtn) {
     drawDiscardBtn.disabled = !drawPhase || !appState.rummyDiscardTop;
+  }
+  if (drawPileBtn) {
+    // The "Allow Drawing Entire Discard Pile" table option, off by default -
+    // see games/rummy/index.js's normalizeMatchSettings(). Hidden entirely
+    // when the table doesn't have it on (nothing to offer), disabled
+    // whenever taking the pile isn't currently legal - same visible/enabled
+    // split as every other option-gated Rummy control.
+    const allowDrawEntirePile = !!(appState.currentTable && appState.currentTable.matchSettings && appState.currentTable.matchSettings.allowDrawEntirePile);
+    drawPileBtn.classList.toggle('hidden', !allowDrawEntirePile);
+    drawPileBtn.disabled = !drawPhase || !appState.rummyDiscardTop;
   }
   if (meldBtn) {
     meldBtn.disabled = !actionPhase || appState.rummySelectedCards.length < 3;
@@ -1029,6 +1051,9 @@ function handleRummyKeys(event) {
   } else if (key === 'w') {
     rummyAttemptDrawDiscard();
     event.preventDefault();
+  } else if (key === 'e') {
+    rummyAttemptDrawPile();
+    event.preventDefault();
   } else if (key === 'm') {
     rummyCommitMeld();
     event.preventDefault();
@@ -1129,7 +1154,12 @@ socket.on('rummyDrawResult', function (payload) {
     playErrorTone();
     return;
   }
-  srSpeak('You drew ' + rummyCardName(payload.card) + ' from the ' + payload.source + '.', 'polite', { canInterruptLock: true });
+  if (payload.source === 'pile') {
+    const count = Array.isArray(payload.cards) ? payload.cards.length : 0;
+    srSpeak('You draw the discard pile, ' + count + ' card' + (count === 1 ? '' : 's') + ' added to your hand.', 'polite', { canInterruptLock: true });
+  } else {
+    srSpeak('You drew ' + rummyCardName(payload.card) + ' from the ' + payload.source + '.', 'polite', { canInterruptLock: true });
+  }
   window.requestAnimationFrame(function () {
     rummyFocusHand();
   });
@@ -1228,6 +1258,7 @@ function rummyBindControls() {
   bindPress(document.getElementById('rummy-meld-size-toggle-btn'), rummyToggleMeldSize);
   bindPress(document.getElementById('rummy-draw-stock-btn'), rummyAttemptDrawStock);
   bindPress(document.getElementById('rummy-draw-discard-btn'), rummyAttemptDrawDiscard);
+  bindPress(document.getElementById('rummy-draw-pile-btn'), rummyAttemptDrawPile);
   bindPress(document.getElementById('rummy-meld-btn'), rummyCommitMeld);
   bindPress(document.getElementById('rummy-layoff-btn'), rummyCommitLayoff);
   bindPress(document.getElementById('rummy-discard-btn'), rummyAttemptDiscardSelected);

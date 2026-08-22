@@ -168,6 +168,18 @@
               </select>
             </label>
           </div>
+          <div class="checkbox-row">
+            <label class="inline-label" for="rummy-allow-draw-entire-pile">
+              <input id="rummy-allow-draw-entire-pile" type="checkbox">
+              Allow Drawing Entire Discard Pile
+            </label>
+          </div>
+          <div class="checkbox-row">
+            <label class="inline-label" for="rummy-ace-high-or-low">
+              <input id="rummy-ace-high-or-low" type="checkbox">
+              Ace High or Low
+            </label>
+          </div>
           <p class="hint">Rummy seats 2-6 players. If only one player has joined, starting the table fills the second seat with a computer player - tables of three or more start as-is.</p>
         </div>
         <div class="row">
@@ -371,6 +383,7 @@
           <div id="rummy-controls" class="rummy-controls">
             <button id="rummy-draw-stock-btn" type="button">Draw Stock</button>
             <button id="rummy-draw-discard-btn" type="button">Draw Discard</button>
+            <button id="rummy-draw-pile-btn" type="button" class="hidden">Draw Pile</button>
             <button id="rummy-meld-btn" type="button">Meld Marked Cards</button>
             <button id="rummy-layoff-btn" type="button">Lay Off Marked Cards</button>
             <button id="rummy-discard-btn" type="button">Discard Marked Card</button>
@@ -496,6 +509,7 @@
           <li>Enlarge Melds / Shrink Melds (button, above the melds board): make the meld card images bigger or return them to the default compact size</li>
           <li>D: draw from the stock (your turn, before acting)</li>
           <li>W: draw from the discard pile (your turn, before acting)</li>
+          <li>E: draw the entire discard pile into your hand, instead of just the top card - only when the table's "Allow Drawing Entire Discard Pile" option is on, it is your turn, you are in the draw phase, and the discard pile has cards</li>
           <li>Sort cards by (button, above your hand), or G: switch your hand between sorting by card value and by suit</li>
           <li>H: announce your full hand</li>
           <li>T: announce hand number, phase, whose turn it is, and your own seat number</li>

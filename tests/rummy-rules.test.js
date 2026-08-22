@@ -407,3 +407,99 @@ test('card ordering is A < 2 < ... < Q < K < Joker in both sort modes', () => {
   const byValue = sortHandByValue(['KC', '1J', 'AC']);
   assert.deepEqual(byValue, ['AC', 'KC', '1J']);
 });
+
+// --- Ace High or Low (optional table rule) ----------------------------------
+// Off (undefined/false options, or omitted entirely) must reproduce the
+// exact pre-existing ace-low-only behavior above - these tests exist to lock
+// that default in explicitly, not just rely on it being implied by the tests
+// above that never pass an options argument at all.
+
+const ACE_LOW = { aceHighOrLow: false };
+const ACE_HIGH = { aceHighOrLow: true };
+
+test('isValidRun: ace-low-only mode (option off) accepts A-2-3', () => {
+  assert.ok(rules.isValidRun(['AC', '2C', '3C'], ACE_LOW));
+});
+
+test('isValidRun: ace-low-only mode (option off) rejects Q-K-A', () => {
+  assert.ok(!rules.isValidRun(['QC', 'KC', 'AC'], ACE_LOW));
+});
+
+test('isValidRun: ace-high-or-low mode accepts A-2-3', () => {
+  assert.ok(rules.isValidRun(['AC', '2C', '3C'], ACE_HIGH));
+});
+
+test('isValidRun: ace-high-or-low mode accepts Q-K-A', () => {
+  assert.ok(rules.isValidRun(['QC', 'KC', 'AC'], ACE_HIGH));
+});
+
+test('isValidRun: K-A-2 (wraparound) is rejected in both ace-low-only and ace-high-or-low modes', () => {
+  assert.ok(!rules.isValidRun(['KC', 'AC', '2C'], ACE_LOW));
+  assert.ok(!rules.isValidRun(['KC', 'AC', '2C'], ACE_HIGH));
+});
+
+test('cardValue: an Ace is worth 1 deadwood in ace-low-only mode, 11 in ace-high-or-low mode - every other card is unaffected', () => {
+  assert.equal(rules.cardValue('AC', ACE_LOW), 1);
+  assert.equal(rules.cardValue('AC', ACE_HIGH), 11);
+  assert.equal(rules.cardValue('KC', ACE_HIGH), 10);
+  assert.equal(rules.cardValue('5C', ACE_HIGH), 5);
+});
+
+test('cardValue: omitting options entirely defaults to ace-low (1) - existing callers that never pass options are unaffected', () => {
+  assert.equal(rules.cardValue('AC'), 1);
+});
+
+test('classifyMeld: Q-K-A classifies as a run only when ace-high-or-low is on', () => {
+  assert.deepEqual(rules.classifyMeld(['QC', 'KC', 'AC'], ACE_LOW), { valid: false });
+  assert.deepEqual(rules.classifyMeld(['QC', 'KC', 'AC'], ACE_HIGH), { valid: true, type: 'run' });
+});
+
+test('canExtendMeld: an ace-low A-2-3 run can still extend upward with 4C, and can never wrap below the Ace, in either mode', () => {
+  const run = { type: 'run', cards: ['AC', '2C', '3C'] };
+  assert.ok(rules.canExtendMeld(run, '4C', ACE_LOW));
+  assert.ok(rules.canExtendMeld(run, '4C', ACE_HIGH));
+  assert.ok(!rules.canExtendMeld(run, 'KC', ACE_LOW));
+  assert.ok(!rules.canExtendMeld(run, 'KC', ACE_HIGH));
+});
+
+test('canExtendMeld: an ace-high Q-K-A run can extend downward with JC, but never wraps back around to 2C', () => {
+  const run = { type: 'run', cards: ['QC', 'KC', 'AC'] };
+  assert.ok(rules.canExtendMeld(run, 'JC', ACE_HIGH));
+  assert.ok(!rules.canExtendMeld(run, '2C', ACE_HIGH));
+});
+
+test('canExtendMeld: Q-K-A is never reachable at all when ace-high-or-low is off - KC alone cannot even start toward it', () => {
+  const run = { type: 'run', cards: ['TC', 'JC', 'QC'] };
+  assert.ok(!rules.canExtendMeld(run, 'AC', ACE_LOW));
+});
+
+// --- Ace involved in Joker calculations -------------------------------------
+
+test('isValidRun: a real Ace anchoring the top alongside a King, with a Joker filling the Queen gap between them, is only legal in ace-high-or-low mode', () => {
+  // Ace-low alone can't place this Joker at all: interpreting the Ace as
+  // low (1) against a King (13) is a 13-card gap no single Joker can span.
+  // Only the ace-high interpretation (Ace = 14, right after King) makes the
+  // Joker's role unambiguous - it must be the Queen.
+  assert.ok(!rules.isValidRun(['AC', 'KC', '1J'], ACE_LOW));
+  assert.ok(rules.isValidRun(['AC', 'KC', '1J'], ACE_HIGH));
+});
+
+test('findJokerSwapTarget: a real Queen swaps back a Joker standing in for it in a Q(Joker)-K-A run, only reachable in ace-high-or-low mode', () => {
+  const run = { type: 'run', cards: ['AC', 'KC', '1J'] };
+  assert.equal(rules.findJokerSwapTarget(run, 'QC', ACE_HIGH), '1J');
+  // Under ace-low-only this group was never a valid run in the first place
+  // (see the isValidRun test above), so there is nothing to swap.
+  assert.equal(rules.findJokerSwapTarget(run, 'QC', ACE_LOW), null);
+});
+
+test('findBestJokerAssignment: a Joker completes an Ace-King run by filling the Queen gap, only when ace-high-or-low is on', () => {
+  const run = { type: 'run', cards: ['AC', 'KC'] };
+  assert.deepEqual(rules.findBestJokerAssignment(run, ['1J'], ACE_HIGH).cards, ['1J']);
+  assert.deepEqual(rules.findBestJokerAssignment(run, ['1J'], ACE_LOW).cards, []);
+});
+
+test('scoreHand: an unmatched Ace left in hand scores 1 deadwood in ace-low-only mode and 11 in ace-high-or-low mode', () => {
+  const hands = [[], ['AC', '5H']];
+  assert.deepEqual(rules.scoreHand(hands, 0, ACE_LOW).deadwoodByPlayer, [0, 6]);
+  assert.deepEqual(rules.scoreHand(hands, 0, ACE_HIGH).deadwoodByPlayer, [0, 16]);
+});

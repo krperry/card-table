@@ -59,6 +59,87 @@ function chooseDrawSource(hand, topDiscard) {
   return 'stock';
 }
 
+// --- Entire discard pile (optional table rule: matchSettings.
+// allowDrawEntirePile - see games/rummy/index.js's normalizeMatchSettings)---
+// The bot must never take the whole pile just because it's an option (per
+// the issue this exists for: "do not have the bot blindly take the pile
+// simply because it can") - taking 12 cards for one mildly useful one is a
+// bad trade, while taking 4 cards that immediately meld or lay off is a good
+// one. countUsefulPileCards() walks the pile top-to-bottom, simulating it
+// being added to the hand one card at a time (so a pair of same-rank cards
+// BOTH sitting in the pile counts each other, same reasoning as
+// chooseDrawSource()'s single-card completesVisibleMeld() check), scoring a
+// card "useful" if it would either complete/extend something already
+// visible in the (growing) simulated hand, or lay off directly onto an
+// existing meld on the table. A Joker is always useful (it's the scarcest,
+// most flexible resource in the deck - see games/rummy/rules.js's header).
+const PILE_MIN_SIZE_TO_CONSIDER = 2;
+const PILE_USEFUL_CARD_WEIGHT = 6;
+const PILE_JOKER_BONUS = 10;
+const PILE_USELESS_CARD_PENALTY = 4;
+const PILE_DEADWOOD_WEIGHT = 0.5;
+const PILE_TAKE_SCORE_THRESHOLD = 3;
+
+function countUsefulPileCards(hand, discardPile, melds, options) {
+  const simulatedHand = hand.slice();
+  let useful = 0;
+  discardPile.forEach(function (card) {
+    const isUseful = rules.isJoker(card)
+      || completesVisibleMeld(simulatedHand, card)
+      || (melds || []).some(function (seatGroups) {
+        return (seatGroups || []).some(function (group) { return rules.canExtendMeld(group, card, options); });
+      });
+    if (isUseful) {
+      useful++;
+    }
+    simulatedHand.push(card);
+  });
+  return useful;
+}
+
+// score = useful_cards*weight + jokers*bonus - useless_cards*penalty -
+// deadwood_added*weight (see the issue's list of factors to weigh: pile
+// size, immediate/extended melds, deadwood added/eliminated, Jokers, and how
+// close it gets the bot to going out - going-out potential is already
+// implicitly covered since a hand full of useful cards drives deadwood and
+// uselessCount both toward zero, which is exactly what maximizes this
+// score). Only ever considered for a pile with at least
+// PILE_MIN_SIZE_TO_CONSIDER cards - a 1-card pile is just an ordinary
+// top-discard take, already handled by chooseDrawSource().
+function evaluateDiscardPile(hand, discardPile, melds, options) {
+  if (!Array.isArray(discardPile) || discardPile.length < PILE_MIN_SIZE_TO_CONSIDER) {
+    return { take: false, score: -Infinity };
+  }
+  const usefulCount = countUsefulPileCards(hand, discardPile, melds, options);
+  const uselessCount = discardPile.length - usefulCount;
+  const jokerCount = discardPile.filter(rules.isJoker).length;
+  const deadwoodAdded = discardPile.reduce(function (sum, c) { return sum + rules.cardValue(c, options); }, 0);
+  const score = usefulCount * PILE_USEFUL_CARD_WEIGHT
+    + jokerCount * PILE_JOKER_BONUS
+    - uselessCount * PILE_USELESS_CARD_PENALTY
+    - deadwoodAdded * PILE_DEADWOOD_WEIGHT;
+  return { take: score > PILE_TAKE_SCORE_THRESHOLD, score: score, usefulCount: usefulCount };
+}
+
+// The bot's full draw-phase choice - 'pile' (only ever offered when the
+// table rule is on, per context.allowDrawEntirePile), 'discard', or 'stock'.
+// Falls back to the existing chooseDrawSource() stock-vs-discard heuristic
+// whenever taking the whole pile isn't on the table or isn't worth it.
+// context: { allowDrawEntirePile, rulesOptions } - see
+// games/rummy/index.js's runBotTurn(), which builds this from the table's
+// matchSettings/rulesOptions() the same way a human player's client reads
+// them off table.matchSettings.
+function chooseDrawAction(hand, topDiscard, discardPile, melds, context) {
+  const options = context && context.rulesOptions;
+  if (context && context.allowDrawEntirePile && Array.isArray(discardPile) && discardPile.length >= PILE_MIN_SIZE_TO_CONSIDER) {
+    const evaluation = evaluateDiscardPile(hand, discardPile, melds, options);
+    if (evaluation.take) {
+      return 'pile';
+    }
+  }
+  return chooseDrawSource(hand, topDiscard);
+}
+
 function removeCardsFrom(list, cards) {
   cards.forEach(function (card) {
     const index = list.indexOf(card);
@@ -100,16 +181,32 @@ function extractNaturalSets(remaining, melds) {
   });
 }
 
-function extractNaturalRuns(remaining, melds) {
+// Ace-low order value (rules.rankOrderValue, unaffected by any option) and
+// ace-high order value (Ace sorts as if it were rank 14, immediately above
+// King - see games/rummy/rules.js's "Ace High or Low" section) - used to
+// scan a suit's cards for BOTH a low-anchored run (A-2-3, always considered)
+// and, when the table's aceHighOrLow option is on, a high-anchored one
+// (Q-K-A) too. A plain rankOrderValue-only scan would never notice Q-K-A:
+// sorted ace-low, the Ace sits at the very front of the array (value 1),
+// nowhere near Q/K at the back, so no contiguous slice of that single
+// sorted order can ever capture all three.
+function aceLowOrderValue(card) {
+  return rules.rankOrderValue(card);
+}
+function aceHighOrderValue(card) {
+  return rules.rankOf(card) === 'A' ? rules.ACE_HIGH_ORDER_VALUE : rules.rankOrderValue(card);
+}
+
+function extractNaturalRunsForOrder(remaining, melds, orderValueFn) {
   rules.SUITS.forEach(function (suit) {
     const suitCards = remaining
       .filter(function (card) { return rules.suitOf(card) === suit; })
-      .sort(function (a, b) { return rules.rankOrderValue(a) - rules.rankOrderValue(b); });
+      .sort(function (a, b) { return orderValueFn(a) - orderValueFn(b); });
 
     let i = 0;
     while (i < suitCards.length) {
       let j = i;
-      while (j + 1 < suitCards.length && rules.rankOrderValue(suitCards[j + 1]) === rules.rankOrderValue(suitCards[j]) + 1) {
+      while (j + 1 < suitCards.length && orderValueFn(suitCards[j + 1]) === orderValueFn(suitCards[j]) + 1) {
         j++;
       }
       if (j - i + 1 >= 3) {
@@ -122,11 +219,18 @@ function extractNaturalRuns(remaining, melds) {
   });
 }
 
+function extractNaturalRuns(remaining, melds, options) {
+  extractNaturalRunsForOrder(remaining, melds, aceLowOrderValue);
+  if (options && options.aceHighOrLow) {
+    extractNaturalRunsForOrder(remaining, melds, aceHighOrderValue);
+  }
+}
+
 // Attaches every remaining REAL (non-Joker) card that fits some group,
 // across all seats (bot's own seat first - see chooseMeldsAndLayoffs()),
 // mutating `remaining`/`layoffs`/`simulatedMelds` as it goes so a second
 // card can stack onto a group the first lay-off just grew.
-function runNaturalLayoffs(remaining, simulatedMelds, seatOrder, layoffs) {
+function runNaturalLayoffs(remaining, simulatedMelds, seatOrder, layoffs, options) {
   let progressed = true;
   while (progressed) {
     progressed = false;
@@ -137,7 +241,7 @@ function runNaturalLayoffs(remaining, simulatedMelds, seatOrder, layoffs) {
         const seatIndex = seatOrder[s];
         const groups = simulatedMelds[seatIndex] || [];
         for (let g = 0; g < groups.length; g++) {
-          if (rules.canExtendMeld(groups[g], card)) {
+          if (rules.canExtendMeld(groups[g], card, options)) {
             groups[g].cards.push(card);
             layoffs.push({ targetPlayerIndex: seatIndex, cards: [card] });
             removeCardsFrom(remaining, [card]);
@@ -157,14 +261,14 @@ function runNaturalLayoffs(remaining, simulatedMelds, seatOrder, layoffs) {
 // hand. Only candidates that actually use a Joker are returned - a
 // Joker-free option was already handled by the natural passes above.
 
-function generateJokerLayoffCandidates(remaining, simulatedMelds) {
+function generateJokerLayoffCandidates(remaining, simulatedMelds, options) {
   const candidates = [];
   if (!remaining.some(rules.isJoker)) {
     return candidates;
   }
   simulatedMelds.forEach(function (seatGroups, seatIndex) {
     (seatGroups || []).forEach(function (group, groupIndex) {
-      const assignment = rules.findBestJokerAssignment(group, remaining);
+      const assignment = rules.findBestJokerAssignment(group, remaining, options);
       if (assignment.cards.length && assignment.cards.some(rules.isJoker)) {
         candidates.push({
           kind: 'layoff',
@@ -188,14 +292,38 @@ function generateJokerLayoffCandidates(remaining, simulatedMelds) {
 // (discards, other melds) - a full deck-count would be more precise but
 // isn't needed to make the strategic calls the issue asks for, and keeps
 // this a single small function instead of another card-tracking subsystem.
-function naturalCompletionOuts(realCards, type) {
+// Resolves a run candidate's real cards to order values (+ the domain those
+// values live in) for the "how many outs" estimate below. When the group
+// holds an Ace and the table's aceHighOrLow option is on, which of the two
+// possible Ace positions applies is inferred from the OTHER real cards
+// riding along with it: cards T/J/Q/K alongside the Ace mean it's anchoring
+// the top (Q-K-A), cards 2/3/4 mean it's anchoring the bottom (A-2-3) - the
+// same distinction games/rummy/rules.js's isValidRun() makes precisely by
+// trying both and keeping whichever validates, simplified here to a single
+// guess since this is only a soft "how hard to complete" heuristic, not a
+// legality decision.
+function resolveRunOrderValuesAndDomain(realCards, options) {
+  const hasAce = realCards.some(function (c) { return rules.rankOf(c) === 'A'; });
+  if (!hasAce || !(options && options.aceHighOrLow)) {
+    return { values: realCards.map(rules.rankOrderValue), domain: { min: 1, max: 13 } };
+  }
+  const nonAceValues = realCards.filter(function (c) { return rules.rankOf(c) !== 'A'; }).map(rules.rankOrderValue);
+  const looksHigh = nonAceValues.some(function (v) { return v >= 10; });
+  const looksLow = nonAceValues.some(function (v) { return v <= 4; });
+  const useHigh = looksHigh && !looksLow;
+  const aceValue = useHigh ? rules.ACE_HIGH_ORDER_VALUE : rules.ACE_LOW_ORDER_VALUE;
+  const values = realCards.map(function (c) { return rules.rankOf(c) === 'A' ? aceValue : rules.rankOrderValue(c); });
+  return { values: values, domain: useHigh ? { min: 2, max: 14 } : { min: 1, max: 13 } };
+}
+
+function naturalCompletionOuts(realCards, type, options) {
   if (type === 'set') {
     const suits = new Set(realCards.map(rules.suitOf));
     return 4 - suits.size;
   }
   if (type === 'run') {
-    const suit = rules.suitOf(realCards[0]);
-    const values = realCards.map(rules.rankOrderValue).sort(function (a, b) { return a - b; });
+    const resolved = resolveRunOrderValuesAndDomain(realCards, options);
+    const values = resolved.values.slice().sort(function (a, b) { return a - b; });
     const min = values[0];
     const max = values[values.length - 1];
     const gapOuts = (max - min + 1) - values.length;
@@ -203,10 +331,10 @@ function naturalCompletionOuts(realCards, type) {
       return gapOuts;
     }
     let outs = 0;
-    if (min > 1) {
+    if (min > resolved.domain.min) {
       outs++;
     }
-    if (max < 13) {
+    if (max < resolved.domain.max) {
       outs++;
     }
     return outs;
@@ -219,7 +347,42 @@ function naturalCompletionOuts(realCards, type) {
 // them. Mirrors extractNaturalSets()/extractNaturalRuns() above but keeps
 // every legal combination as a scored candidate instead of greedily taking
 // the first one found.
-function generateJokerNewMeldCandidates(remaining) {
+// Run-span candidates for one specific card ordering (see aceLowOrderValue/
+// aceHighOrderValue above) - split out of generateJokerNewMeldCandidates()
+// so it can be run twice (ace-low and, when the table's aceHighOrLow option
+// is on, ace-high too) for the same reason extractNaturalRunsForOrder() is:
+// a single ace-low-sorted scan can never produce a Q-K-A span, since the Ace
+// sorts to the very front of that order, nowhere near Q/K at the back.
+function generateJokerRunCandidatesForOrder(remaining, jokers, orderValueFn, options) {
+  const candidates = [];
+  rules.SUITS.forEach(function (suit) {
+    const suitCards = remaining
+      .filter(function (card) { return rules.suitOf(card) === suit; })
+      .sort(function (a, b) { return orderValueFn(a) - orderValueFn(b); });
+    for (let i = 0; i < suitCards.length; i++) {
+      for (let j = i; j < suitCards.length; j++) {
+        const span = suitCards.slice(i, j + 1);
+        for (let jokerCount = 1; jokerCount <= jokers.length; jokerCount++) {
+          const group = span.concat(jokers.slice(0, jokerCount));
+          if (group.length < 3) {
+            continue;
+          }
+          if (rules.isValidRun(group, options)) {
+            candidates.push({ kind: 'newMeld', type: 'run', cardsUsed: group, realCardsUsed: span });
+          }
+        }
+      }
+    }
+  });
+  return candidates;
+}
+
+// Candidate brand-new melds built from real cards still in hand plus just
+// enough of the bot's actual Jokers (never more than it holds) to complete
+// them. Mirrors extractNaturalSets()/extractNaturalRuns() above but keeps
+// every legal combination as a scored candidate instead of greedily taking
+// the first one found.
+function generateJokerNewMeldCandidates(remaining, options) {
   const candidates = [];
   const jokers = remaining.filter(rules.isJoker);
   if (!jokers.length) {
@@ -247,25 +410,10 @@ function generateJokerNewMeldCandidates(remaining) {
     }
   });
 
-  rules.SUITS.forEach(function (suit) {
-    const suitCards = remaining
-      .filter(function (card) { return rules.suitOf(card) === suit; })
-      .sort(function (a, b) { return rules.rankOrderValue(a) - rules.rankOrderValue(b); });
-    for (let i = 0; i < suitCards.length; i++) {
-      for (let j = i; j < suitCards.length; j++) {
-        const span = suitCards.slice(i, j + 1);
-        for (let jokerCount = 1; jokerCount <= jokers.length; jokerCount++) {
-          const group = span.concat(jokers.slice(0, jokerCount));
-          if (group.length < 3) {
-            continue;
-          }
-          if (rules.isValidRun(group)) {
-            candidates.push({ kind: 'newMeld', type: 'run', cardsUsed: group, realCardsUsed: span });
-          }
-        }
-      }
-    }
-  });
+  candidates.push.apply(candidates, generateJokerRunCandidatesForOrder(remaining, jokers, aceLowOrderValue, options));
+  if (options && options.aceHighOrLow) {
+    candidates.push.apply(candidates, generateJokerRunCandidatesForOrder(remaining, jokers, aceHighOrderValue, options));
+  }
 
   return candidates;
 }
@@ -275,7 +423,7 @@ function generateJokerNewMeldCandidates(remaining) {
 // updated board - e.g. the "5S 6S 7S + Joker(=8S) + 9S, then TS also fits"
 // chain. Mutates the `simulatedMeldsAfter` copy it's given; the caller is
 // responsible for passing a throwaway deep copy.
-function simulateFollowUpLayoffs(remainingAfter, simulatedMeldsAfter) {
+function simulateFollowUpLayoffs(remainingAfter, simulatedMeldsAfter, options) {
   let unlockedCount = 0;
   let unlockedValue = 0;
   let progressed = true;
@@ -289,10 +437,10 @@ function simulateFollowUpLayoffs(remainingAfter, simulatedMeldsAfter) {
       for (let s = 0; s < simulatedMeldsAfter.length && !progressed; s++) {
         const groups = simulatedMeldsAfter[s] || [];
         for (let g = 0; g < groups.length; g++) {
-          if (rules.canExtendMeld(groups[g], card)) {
+          if (rules.canExtendMeld(groups[g], card, options)) {
             groups[g].cards.push(card);
             unlockedCount++;
-            unlockedValue += rules.cardValue(card);
+            unlockedValue += rules.cardValue(card, options);
             remainingAfter.splice(i, 1);
             progressed = true;
             break;
@@ -327,9 +475,10 @@ const OWN_SEAT_TIEBREAK_BONUS = 0.5;
 const EARLY_HAND_REFERENCE_SIZE = 7;
 
 function scoreJokerPlay(candidate, remaining, simulatedMelds, ownSeatIndex, context) {
+  const options = context && context.rulesOptions;
   const jokersUsed = candidate.cardsUsed.filter(rules.isJoker).length;
   const cardsRemovedCount = candidate.cardsUsed.length;
-  const deadwoodRemoved = candidate.cardsUsed.reduce(function (sum, c) { return sum + rules.cardValue(c); }, 0);
+  const deadwoodRemoved = candidate.cardsUsed.reduce(function (sum, c) { return sum + rules.cardValue(c, options); }, 0);
 
   const remainingAfter = remaining.slice();
   removeCardsFrom(remainingAfter, candidate.cardsUsed);
@@ -342,7 +491,7 @@ function scoreJokerPlay(candidate, remaining, simulatedMelds, ownSeatIndex, cont
     meldsAfter[ownSeatIndex] = (meldsAfter[ownSeatIndex] || []).concat([{ type: candidate.type, cards: candidate.cardsUsed.slice() }]);
   }
 
-  const followUp = simulateFollowUpLayoffs(remainingAfter, meldsAfter);
+  const followUp = simulateFollowUpLayoffs(remainingAfter, meldsAfter, options);
   const handSizeAfter = remainingAfter.length;
   const goingOutBonus = handSizeAfter <= 0 ? GOING_OUT_BONUS : 0;
 
@@ -352,7 +501,7 @@ function scoreJokerPlay(candidate, remaining, simulatedMelds, ownSeatIndex, cont
 
   let difficultyAdjustment = 0;
   if (candidate.kind === 'newMeld') {
-    const outs = naturalCompletionOuts(candidate.realCardsUsed, candidate.type);
+    const outs = naturalCompletionOuts(candidate.realCardsUsed, candidate.type, options);
     difficultyAdjustment = outs <= 1
       ? DIFFICULTY_BONUS_PER_OUT_BELOW_TWO * (2 - outs)
       : -(EASY_COMPLETION_PENALTY_PER_EXTRA_OUT * (outs - 1));
@@ -390,6 +539,7 @@ function scoreJokerPlay(candidate, remaining, simulatedMelds, ownSeatIndex, cont
 // is the fewest cards any opponent is currently holding - used for rule 8
 // ("become more aggressive when an opponent is nearly out").
 function chooseMeldsAndLayoffs(hand, allMelds, ownSeatIndex, context) {
+  const options = context && context.rulesOptions;
   const remaining = hand.slice();
   const melds = [];
   const layoffs = [];
@@ -404,16 +554,16 @@ function chooseMeldsAndLayoffs(hand, allMelds, ownSeatIndex, context) {
   }
 
   extractNaturalSets(remaining, melds);
-  extractNaturalRuns(remaining, melds);
+  extractNaturalRuns(remaining, melds, options);
 
   const simulatedMelds = deepCopyMelds(allMelds);
-  runNaturalLayoffs(remaining, simulatedMelds, seatOrder, layoffs);
+  runNaturalLayoffs(remaining, simulatedMelds, seatOrder, layoffs, options);
 
   let guard = 0;
   while (remaining.some(rules.isJoker) && guard < 4) {
     guard++;
-    const candidates = generateJokerLayoffCandidates(remaining, simulatedMelds)
-      .concat(generateJokerNewMeldCandidates(remaining));
+    const candidates = generateJokerLayoffCandidates(remaining, simulatedMelds, options)
+      .concat(generateJokerNewMeldCandidates(remaining, options));
     if (!candidates.length) {
       break;
     }
@@ -445,7 +595,7 @@ function chooseMeldsAndLayoffs(hand, allMelds, ownSeatIndex, context) {
     // "5S 6S 7S + Joker(=8S) + 9S" lay-off, when the winning candidate
     // didn't already bundle them - or any other card newly adjacent to an
     // updated group) should also go, not wait for a future turn.
-    runNaturalLayoffs(remaining, simulatedMelds, seatOrder, layoffs);
+    runNaturalLayoffs(remaining, simulatedMelds, seatOrder, layoffs, options);
   }
 
   return { melds: melds, layoffs: layoffs };
@@ -459,23 +609,38 @@ function chooseMeldsAndLayoffs(hand, allMelds, ownSeatIndex, context) {
 // Joker has the highest deadwood value of any card (see rules.js), so a
 // naive "discard the highest-value safe card" pass would otherwise dump a
 // wild card first every time - the opposite of how anyone actually plays.
-function chooseDiscard(hand) {
+function chooseDiscard(hand, options) {
   if (!Array.isArray(hand) || !hand.length) {
     return null;
+  }
+
+  // "Near" a card means within 2 rank positions on the SAME order-value
+  // scale. Ace-low is always checked; when the table's aceHighOrLow option
+  // is on, the Ace is also checked against the ace-high scale (so a K/Q
+  // sitting near an Ace correctly protects it as a near-run card too - see
+  // aceHighOrderValue() above). This only ever makes a card MORE likely to
+  // be protected (never less), matching the issue's guidance that Ace
+  // becomes more important to hang onto (or meld) once it's worth 11
+  // deadwood instead of 1.
+  function isNearInOrder(hand, card, orderValueFn) {
+    const suit = rules.suitOf(card);
+    const v = orderValueFn(card);
+    return hand.some(function (c) {
+      if (c === card || rules.suitOf(c) !== suit) {
+        return false;
+      }
+      return Math.abs(orderValueFn(c) - v) <= 2;
+    });
   }
 
   function isPartOfPairOrNearRun(card) {
     if (cardsShareRank(hand, card) >= 1) {
       return true;
     }
-    const suit = rules.suitOf(card);
-    const v = rules.rankOrderValue(card);
-    return hand.some(function (c) {
-      if (c === card || rules.suitOf(c) !== suit) {
-        return false;
-      }
-      return Math.abs(rules.rankOrderValue(c) - v) <= 2;
-    });
+    if (isNearInOrder(hand, card, aceLowOrderValue)) {
+      return true;
+    }
+    return !!(options && options.aceHighOrLow) && isNearInOrder(hand, card, aceHighOrderValue);
   }
 
   const nonJokers = hand.filter(function (card) { return !rules.isJoker(card); });
@@ -484,12 +649,13 @@ function chooseDiscard(hand) {
   const pool = safeToDiscard.length ? safeToDiscard : candidatePool;
 
   return pool.reduce(function (highest, card) {
-    return rules.cardValue(card) > rules.cardValue(highest) ? card : highest;
+    return rules.cardValue(card, options) > rules.cardValue(highest, options) ? card : highest;
   }, pool[0]);
 }
 
 module.exports = {
   chooseDrawSource: chooseDrawSource,
+  chooseDrawAction: chooseDrawAction,
   chooseMeldsAndLayoffs: chooseMeldsAndLayoffs,
   chooseDiscard: chooseDiscard
 };

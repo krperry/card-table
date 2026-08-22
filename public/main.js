@@ -143,6 +143,8 @@ const el = {
   rummyPanel: document.getElementById('rummy-panel'),
   rummyTableSettings: document.getElementById('rummy-table-settings'),
   newTableRummyTargetScore: document.getElementById('new-table-rummy-target-score'),
+  rummyAllowDrawEntirePile: document.getElementById('rummy-allow-draw-entire-pile'),
+  rummyAceHighOrLow: document.getElementById('rummy-ace-high-or-low'),
   helpOverlay: document.getElementById('help-overlay'),
   closeHelpBtn: document.getElementById('close-help-btn'),
   announcementOverlay: document.getElementById('announcement-overlay'),
@@ -877,7 +879,9 @@ function createTable() {
     pointsToEndGame: Number.isFinite(pointsToEndGame) ? pointsToEndGame : undefined,
     targetScore: Number.isFinite(targetScore) ? targetScore : undefined,
     cribbageTargetScore: Number.isFinite(cribbageTargetScore) ? cribbageTargetScore : undefined,
-    rummyTargetScore: Number.isFinite(rummyTargetScore) ? rummyTargetScore : undefined
+    rummyTargetScore: Number.isFinite(rummyTargetScore) ? rummyTargetScore : undefined,
+    rummyAllowDrawEntirePile: !!(el.rummyAllowDrawEntirePile && el.rummyAllowDrawEntirePile.checked),
+    rummyAceHighOrLow: !!(el.rummyAceHighOrLow && el.rummyAceHighOrLow.checked)
   });
 }
 
@@ -1489,7 +1493,14 @@ function render() {
         const handText = appState.gameStatus === 'in_game' && appState.currentTable.rummy
           ? ' | Hand ' + appState.currentTable.rummy.handNumber
           : '';
-        el.tableMatchSettings.textContent = 'Target score: ' + (matchSettings.targetScore || 500) + handText;
+        const rummyRules = [];
+        if (matchSettings.allowDrawEntirePile) {
+          rummyRules.push('Draw entire pile allowed');
+        }
+        if (matchSettings.aceHighOrLow) {
+          rummyRules.push('Ace high or low');
+        }
+        el.tableMatchSettings.textContent = 'Target score: ' + (matchSettings.targetScore || 500) + handText + (rummyRules.length ? ' | ' + rummyRules.join(', ') : '');
       } else {
         const roundText = appState.gameStatus === 'in_game' && typeof appState.currentTable.roundNumber === 'number'
           ? ' | This is round ' + appState.currentTable.roundNumber + ' of ' + matchSettings.maxRounds

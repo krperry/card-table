@@ -109,3 +109,15 @@ Game hosts may choose the victory condition before the game begins. A
 game may end after a selected number of rounds, when a selected point
 total is reached, or using any other scoring option supported by the
 game.
+
+**Suggested target scores:** the winning-score setting has a big effect on
+how long a match runs, especially with fewer players. These are
+recommendations, not requirements - a table can use any allowed score, and
+players wanting a shorter game should just pick a lower target:
+
+- **2 players:** 100-200 points
+- **3-4 players:** 200-400 points
+- **5-6 players:** around 500 points
+
+Higher target scores mean longer games, particularly at the low end of the
+player-count range.

@@ -53,19 +53,140 @@ function isJoker(card) {
   return typeof card === 'string' && card.charAt(1) === JOKER_SUIT_CHAR;
 }
 
-// Deadwood/scoring value: ace is always 1 (never 11/high), face cards are all
-// 10, everything else is its pip value.
+// Deadwood/scoring value: ace is 1 by default (ace-low-only tables), or 11
+// when the table's aceHighOrLow option is on (see the "Ace High or Low"
+// section in the header and cardValue() below) - face cards are all 10,
+// everything else is its pip value.
 const CARD_VALUES = {
   '2': 2, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8, '9': 9,
   T: 10, J: 10, Q: 10, K: 10, A: 1
 };
+const ACE_LOW_DEADWOOD_VALUE = 1;
+const ACE_HIGH_DEADWOOD_VALUE = 11;
 
 // Ordinal rank position for run-adjacency purposes only, ace low, no
-// wraparound (see the header comment above).
+// wraparound (see the header comment above). This remains the ONLY mapping
+// used for sorting/display and for any table that doesn't enable the
+// aceHighOrLow option. See ACE_LOW_ORDER_VALUE/ACE_HIGH_ORDER_VALUE and the
+// runOrderValue()/computeRunBoundsForMode() helpers further below for how a
+// table with aceHighOrLow enabled additionally allows an Ace to anchor the
+// TOP of a run (Q-K-A) without ever permitting a wraparound run (K-A-2).
 const RANK_ORDER_VALUES = {
   A: 1, '2': 2, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8, '9': 9,
   T: 10, J: 11, Q: 12, K: 13
 };
+
+// --- Ace High or Low (optional table rule) ----------------------------------
+// Default (option off): an Ace is low-only, exactly like RANK_ORDER_VALUES
+// above (order value 1, deadwood value 1) - no behavior change for tables
+// that don't enable this option.
+//
+// When games/rummy/index.js's matchSettings.aceHighOrLow is on, a run's Ace
+// may instead anchor the TOP of the suit (Q-K-A), worth 11 deadwood in that
+// case. Modeled as two independent "modes" a run can be validated under:
+// mode ACE_LOW_ORDER_VALUE (1) is the everyday case above; mode
+// ACE_HIGH_ORDER_VALUE (14) reassigns the Ace's order value to sit
+// immediately above King (13) instead of immediately below 2. A run is
+// legal if EITHER mode validates it (see isValidRun() below) - never both at
+// once, since only one physical Ace exists per suit, which is exactly what
+// rules out a wraparound run: K-A-2 would need the Ace simultaneously above
+// King (mode 14) AND below 2 (mode 1), which no single mode can satisfy (see
+// computeRunBoundsForMode()'s per-mode domain clamp).
+const ACE_LOW_ORDER_VALUE = 1;
+const ACE_HIGH_ORDER_VALUE = 14;
+
+// Which Ace-position modes are worth trying for a run, per the table's
+// aceHighOrLow setting - just [1] (unchanged behavior) when the option is
+// off or unset.
+function aceRunModes(options) {
+  return options && options.aceHighOrLow ? [ACE_LOW_ORDER_VALUE, ACE_HIGH_ORDER_VALUE] : [ACE_LOW_ORDER_VALUE];
+}
+
+// A real card's order value under a specific Ace-position mode - only an
+// Ace's value actually depends on `mode`; every other rank keeps its normal
+// RANK_ORDER_VALUES entry regardless.
+function runOrderValue(card, mode) {
+  return rankOf(card) === 'A' ? mode : RANK_ORDER_VALUES[rankOf(card)];
+}
+
+// The legal order-value window for a given mode - mode 1 (ace-low) permits
+// 1-13 (unchanged from before this option existed); mode 14 (ace-high)
+// shifts the SAME 13-slot window up by one, to 2-14, so "2" is still the
+// lowest real card and "14" (the Ace) is the highest. A leftover Joker can
+// only ever extend a run out to these bounds - never past them - which is
+// what keeps a run from ever wrapping past the suit's real top or bottom.
+function runDomainForMode(mode) {
+  return mode === ACE_HIGH_ORDER_VALUE ? { min: 2, max: 14 } : { min: 1, max: 13 };
+}
+
+// Core "does this bag of real+joker cards form one legal run under this
+// specific Ace mode" check, shared by isValidRun() (which just needs a
+// yes/no across every applicable mode) and runGroupBoundsList() (which needs
+// the resulting min/max span, e.g. to decide what a Joker in an
+// already-on-the-table run currently represents). Returns null when the
+// mode doesn't validate; otherwise { min, max, mode } describing the run's
+// effective span under that mode (min/max already account for any leftover
+// Jokers extending either end, same as the old runEffectiveBounds()).
+function computeRunBoundsForMode(nonJokerCards, jokerCount, mode) {
+  const values = nonJokerCards.map(function (card) { return runOrderValue(card, mode); }).sort(function (a, b) { return a - b; });
+  for (let i = 1; i < values.length; i++) {
+    if (values[i] === values[i - 1]) {
+      return null;
+    }
+  }
+  const min = values[0];
+  const max = values[values.length - 1];
+  const domain = runDomainForMode(mode);
+  const internalGapsNeeded = (max - min + 1) - values.length;
+  if (internalGapsNeeded > jokerCount) {
+    return null;
+  }
+  let leftover = jokerCount - internalGapsNeeded;
+  let effMin = min;
+  let effMax = max;
+  while (leftover > 0) {
+    if (effMin > domain.min) {
+      effMin--;
+    } else if (effMax < domain.max) {
+      effMax++;
+    } else {
+      return null;
+    }
+    leftover--;
+  }
+  return { min: effMin, max: effMax, mode: mode };
+}
+
+// Every Ace-position mode under which `cards` (a run group's full card list,
+// real + Joker) currently forms a legal run - usually exactly one entry, but
+// a Joker-heavy group with no cards that pin it to one interpretation (e.g.
+// a lone Ace plus two Jokers) can legally validate under more than one, same
+// "genuinely ambiguous" territory the header comment already documents for
+// a Joker's exact position. canExtendMeld()/findJokerSwapTarget() below
+// check every returned mode and accept if ANY of them allow the requested
+// extension/swap - the same "accept if any legal interpretation permits it"
+// approach the rest of this file already takes toward Joker ambiguity, and
+// it's what keeps e.g. a swap-in Ace correctly routed to findJokerSwapTarget
+// (the slot a Joker is already occupying) rather than canExtendMeld (which
+// only ever grows a group).
+function runGroupBoundsList(cards, options) {
+  if (!Array.isArray(cards) || !cards.length) {
+    return [];
+  }
+  const nonJokers = cards.filter(function (card) { return !isJoker(card); });
+  const jokerCount = cards.length - nonJokers.length;
+  if (!nonJokers.length) {
+    return [];
+  }
+  const results = [];
+  aceRunModes(options).forEach(function (mode) {
+    const bounds = computeRunBoundsForMode(nonJokers, jokerCount, mode);
+    if (bounds) {
+      results.push({ min: bounds.min, max: bounds.max, mode: mode, domain: runDomainForMode(mode) });
+    }
+  });
+  return results;
+}
 
 const MIN_SET_SIZE = 3;
 const MAX_SET_SIZE = 4;
@@ -92,9 +213,14 @@ function suitOf(card) {
   return typeof card === 'string' ? card.charAt(1) : '';
 }
 
-function cardValue(card) {
+// options.aceHighOrLow flips an Ace's deadwood value from 1 to 11 (see the
+// "Ace High or Low" section above) - every other card's value is unaffected.
+function cardValue(card, options) {
   if (isJoker(card)) {
     return JOKER_DEADWOOD_VALUE;
+  }
+  if (rankOf(card) === 'A') {
+    return options && options.aceHighOrLow ? ACE_HIGH_DEADWOOD_VALUE : ACE_LOW_DEADWOOD_VALUE;
   }
   return CARD_VALUES[rankOf(card)] || 0;
 }
@@ -225,12 +351,15 @@ function isValidSet(cards) {
   });
 }
 
-// 3+ cards, all the same suit, consecutive ranks (ace low only - see
-// header). Jokers are wild: they fill gaps between the real cards' ranks,
-// and any left over extend the span at either end, as long as there's room
-// within the ace-low 1-13 bound (no wraparound). At least one real card is
-// required to anchor the run's suit (see header).
-function isValidRun(cards) {
+// 3+ cards, all the same suit, consecutive ranks. Ace-low only (A-2-3) by
+// default; when options.aceHighOrLow is set, an Ace may instead anchor the
+// top of the suit (Q-K-A) - see the "Ace High or Low" section above for how
+// that's modeled, and why it can never produce a wraparound run (K-A-2).
+// Jokers are wild: they fill gaps between the real cards' ranks, and any
+// left over extend the span at either end, as long as there's room within
+// the applicable mode's bound. At least one real card is required to anchor
+// the run's suit (see header).
+function isValidRun(cards, options) {
   if (!Array.isArray(cards) || cards.length < MIN_RUN_SIZE) {
     return false;
   }
@@ -244,63 +373,16 @@ function isValidRun(cards) {
     return false;
   }
 
-  const values = nonJokers.map(rankOrderValue).sort(function (a, b) { return a - b; });
-  for (let i = 1; i < values.length; i++) {
-    if (values[i] === values[i - 1]) {
-      return false;
-    }
-  }
-
-  const min = values[0];
-  const max = values[values.length - 1];
-  const internalGapsNeeded = (max - min + 1) - values.length;
-  if (internalGapsNeeded > jokerCount) {
-    return false;
-  }
-  const leftoverJokers = jokerCount - internalGapsNeeded;
-  const roomBelow = min - 1;
-  const roomAbove = 13 - max;
-  return leftoverJokers <= roomBelow + roomAbove;
+  return aceRunModes(options).some(function (mode) {
+    return computeRunBoundsForMode(nonJokers, jokerCount, mode) !== null;
+  });
 }
 
-// The contiguous rank-order span a run group currently covers, accounting
-// for Jokers used as gap-fillers/extensions - not stored explicitly on the
-// group (see the header comment), so it's recomputed from the group's cards
-// each time canExtendMeld() needs it. Any leftover (non-gap-filling) Jokers
-// are deterministically assigned to extend the low end first, then the high
-// end - their exact position is genuinely ambiguous in real Rummy (a Joker's
-// identity isn't fixed until a real card replaces it), so this is just a
-// consistent, defensible choice, not "the" correct one. Returns null if the
-// group has no real card to anchor it (shouldn't happen for an
-// already-valid run).
-function runEffectiveBounds(cards) {
-  const jokers = cards.filter(isJoker);
-  const nonJokers = cards.filter(function (card) { return !isJoker(card); });
-  if (!nonJokers.length) {
-    return null;
-  }
-  const values = nonJokers.map(rankOrderValue).sort(function (a, b) { return a - b; });
-  let min = values[0];
-  let max = values[values.length - 1];
-  let leftover = jokers.length - ((max - min + 1) - values.length);
-  while (leftover > 0) {
-    if (min > 1) {
-      min--;
-    } else if (max < 13) {
-      max++;
-    } else {
-      break;
-    }
-    leftover--;
-  }
-  return { min: min, max: max };
-}
-
-function classifyMeld(cards) {
+function classifyMeld(cards, options) {
   if (isValidSet(cards)) {
     return { valid: true, type: 'set' };
   }
-  if (isValidRun(cards)) {
+  if (isValidRun(cards, options)) {
     return { valid: true, type: 'run' };
   }
   return { valid: false };
@@ -311,7 +393,7 @@ function classifyMeld(cards) {
 // `card` itself may be a Joker (wild) or a real card extending a group that
 // already contains a Joker (or both) - see isValidSet()/isValidRun() above
 // for how Jokers factor into a group's rank/suit identity.
-function canExtendMeld(meldGroup, card) {
+function canExtendMeld(meldGroup, card, options) {
   if (!meldGroup || !Array.isArray(meldGroup.cards) || !meldGroup.cards.length) {
     return false;
   }
@@ -338,20 +420,25 @@ function canExtendMeld(meldGroup, card) {
   }
 
   if (meldGroup.type === 'run') {
-    const bounds = runEffectiveBounds(meldGroup.cards);
-    if (!bounds) {
+    // See runGroupBoundsList()'s header - a group can validate under more
+    // than one Ace-position mode in rare Joker-heavy cases, so an extension
+    // is accepted if ANY applicable mode allows it.
+    const boundsList = runGroupBoundsList(meldGroup.cards, options);
+    if (!boundsList.length) {
       return false;
     }
     if (isJoker(card)) {
-      return bounds.min > 1 || bounds.max < 13;
+      return boundsList.some(function (bounds) { return bounds.min > bounds.domain.min || bounds.max < bounds.domain.max; });
     }
     const nonJokers = meldGroup.cards.filter(function (c) { return !isJoker(c); });
     const suit = suitOf(nonJokers[0]);
     if (suitOf(card) !== suit) {
       return false;
     }
-    const cardValueOrder = rankOrderValue(card);
-    return cardValueOrder === bounds.min - 1 || cardValueOrder === bounds.max + 1;
+    return boundsList.some(function (bounds) {
+      const cardValueOrder = runOrderValue(card, bounds.mode);
+      return cardValueOrder === bounds.min - 1 || cardValueOrder === bounds.max + 1;
+    });
   }
 
   return false;
@@ -367,7 +454,7 @@ function canExtendMeld(meldGroup, card) {
 // null if `card` doesn't match any Joker's slot in this group (including
 // when meldGroup has no Joker at all, or `card` is itself a Joker - a Joker
 // can never swap out another Joker).
-function findJokerSwapTarget(meldGroup, card) {
+function findJokerSwapTarget(meldGroup, card, options) {
   if (!meldGroup || !Array.isArray(meldGroup.cards) || isJoker(card)) {
     return null;
   }
@@ -394,16 +481,19 @@ function findJokerSwapTarget(meldGroup, card) {
     if (suitOf(card) !== suit) {
       return null;
     }
-    const bounds = runEffectiveBounds(meldGroup.cards);
-    if (!bounds) {
-      return null;
+    const boundsList = runGroupBoundsList(meldGroup.cards, options);
+    for (let i = 0; i < boundsList.length; i++) {
+      const bounds = boundsList[i];
+      const cardPosition = runOrderValue(card, bounds.mode);
+      if (cardPosition < bounds.min || cardPosition > bounds.max) {
+        continue;
+      }
+      const positionTaken = nonJokers.some(function (c) { return runOrderValue(c, bounds.mode) === cardPosition; });
+      if (!positionTaken) {
+        return jokers[0];
+      }
     }
-    const cardPosition = rankOrderValue(card);
-    if (cardPosition < bounds.min || cardPosition > bounds.max) {
-      return null;
-    }
-    const positionTaken = nonJokers.some(function (c) { return rankOrderValue(c) === cardPosition; });
-    return positionTaken ? null : jokers[0];
+    return null;
   }
 
   return null;
@@ -450,11 +540,15 @@ function findJokerSwapTarget(meldGroup, card) {
 // then score across groups/new-melds) call this - see this file's header
 // and games/rummy/bots.js's header for why the two must share one engine
 // instead of forming independent opinions about Joker legality.
-function findBestJokerAssignment(meldGroup, candidateCards) {
+function findBestJokerAssignment(meldGroup, candidateCards, options) {
   if (!meldGroup || !Array.isArray(meldGroup.cards) || !meldGroup.cards.length) {
     return { cards: [] };
   }
-  const validate = meldGroup.type === 'set' ? isValidSet : meldGroup.type === 'run' ? isValidRun : null;
+  const validate = meldGroup.type === 'set'
+    ? isValidSet
+    : meldGroup.type === 'run'
+      ? function (cards) { return isValidRun(cards, options); }
+      : null;
   const pool = Array.isArray(candidateCards) ? candidateCards.filter(function (c) { return typeof c === 'string'; }) : [];
   if (!validate || !pool.length) {
     return { cards: [] };
@@ -509,9 +603,9 @@ function reshuffleDiscardIntoStock(discardPile) {
 // player's deadwood; everyone else scores 0 for this hand. Pure function -
 // games/rummy/index.js is responsible for adding pointsAwarded onto
 // table.scores.
-function scoreHand(hands, wentOutPlayerIndex) {
+function scoreHand(hands, wentOutPlayerIndex, options) {
   const deadwoodByPlayer = hands.map(function (hand) {
-    return (hand || []).reduce(function (sum, card) { return sum + cardValue(card); }, 0);
+    return (hand || []).reduce(function (sum, card) { return sum + cardValue(card, options); }, 0);
   });
 
   const pointsAwarded = hands.map(function () { return 0; });
@@ -548,6 +642,9 @@ module.exports = {
   suitOf: suitOf,
   cardValue: cardValue,
   rankOrderValue: rankOrderValue,
+  ACE_LOW_ORDER_VALUE: ACE_LOW_ORDER_VALUE,
+  ACE_HIGH_ORDER_VALUE: ACE_HIGH_ORDER_VALUE,
+  runOrderValue: runOrderValue,
   cardName: cardName,
   suitName: suitName,
   sortHand: sortHand,

@@ -35,10 +35,28 @@ There are two kinds:
   7♣ 7♦ 7♥).
 - **Run**: three or more consecutive cards of the same suit.
 
-**House rule:** runs are **ace-low only** in this implementation - A-2-3 is
-a legal run, but Q-K-A is not. Pagat.com does not pin this down definitively
-either way; ace-low-only is the simplest, most common basic-Rummy
-convention and avoids an "ace is both high and low" ambiguity.
+**House rule:** by default, runs are **ace-low only** in this
+implementation - A-2-3 is a legal run, but Q-K-A is not. Pagat.com does not
+pin this down definitively either way; ace-low-only is the simplest, most
+common basic-Rummy convention and avoids an "ace is both high and low"
+ambiguity.
+
+**Optional table rule - Ace High or Low:** a host may instead configure a
+table so the Ace can be used at **either** end of a run:
+
+- **Ace Low Only** (default): the Ace can only be used below 2.
+  Example: **A-2-3** is legal. As deadwood, an unmatched Ace is worth
+  **1 point**.
+- **Ace High or Low**: the Ace can be used below 2 *or* above King.
+  Examples: **A-2-3** and **Q-K-A** are both legal. As deadwood, an
+  unmatched Ace is worth **11 points** in this mode - reflecting how much
+  more valuable (and costly to get caught holding) it becomes once it can
+  anchor either end of a run.
+
+Either way, the Ace can never **wrap around**: **K-A-2 is not a valid
+run**, in either mode. There is no circular sequence from King through Ace
+back to 2 - the Ace anchors one end of the suit or the other, never both at
+once.
 
 **House rule:** unlike Gin Rummy, there is **no minimum point requirement**
 to lay down your first meld - any valid set or run may be melded the moment
@@ -104,16 +122,60 @@ reshuffled into a new stock. In the extremely rare case that the discard
 pile also has nothing left to reshuffle, the hand ends immediately with no
 winner and no score change.
 
+**Optional table rule - Draw the Entire Discard Pile:** a host may configure
+a table to allow picking up the **whole discard pile** instead of only its
+top card. This adds a third choice to the draw step:
+
+- Draw from the stock, or
+- take the top discard, or
+- take the **entire discard pile**.
+
+Taking the whole pile moves every card currently in it into your hand as-is
+- nothing is auto-melded or auto-played for you. It counts as your draw for
+the turn exactly like the other two choices do: you still act and discard
+normally afterward, and you do not get a second draw. A **Draw Pile** button
+appears whenever this option is on and taking the pile is currently legal;
+the **E** key does the same thing.
+
 ## Going Out and Scoring
 
 The first player to empty their hand goes out and wins the hand.
 **Deadwood** is the point value of the cards left in a losing player's
 hand: number cards score their pip value, face cards (Jack, Queen, King)
-score 10, and Aces score 1 (never 11).
+score 10, and an Ace scores 1 point - or 11 points if the table's Ace High
+or Low option is on (see above).
 
 The player who went out scores the **sum of every other player's
 deadwood**. Everyone else scores 0 for that hand. These points accumulate
 onto each player's running match total.
+
+## Joker Strategy
+
+Jokers are wild - they can fill in for whatever card a legal meld needs.
+That flexibility makes them valuable, but not something to spend the moment
+a legal spot opens up. A few things worth keeping in mind:
+
+- Jokers are especially useful for completing a combination that would
+  otherwise need one very specific card - a run missing a single internal
+  rank, for example.
+- A Joker that unlocks **several** other cards at once (completing a meld
+  that then lets more cards from your hand land as lay-offs) is usually a
+  better use of it than one that only helps a single card.
+- If a meld can easily be completed with a real card instead, it's often
+  worth waiting - save the Joker for a harder problem.
+- Jokers are a good way to get rid of high-value deadwood, like Kings and
+  Queens, that would otherwise be expensive to be caught holding.
+- Don't hold a Joker so long that another player goes out while it's still
+  sitting unused in your hand - as opponents get closer to going out,
+  reducing your own deadwood matters more than saving the Joker for a
+  theoretically better play later.
+- When more than one Joker play is available, prefer the one that improves
+  your overall hand the most, not just the first legal spot you notice.
+
+A good rule of thumb: use a Joker where it solves the **hardest** problem in
+your hand. If one meld needs one very specific card while another could be
+completed by several different cards, the Joker is usually more valuable in
+the difficult meld.
 
 ## Winning
 
@@ -122,11 +184,26 @@ pushes some player's cumulative score to the table's configured target
 score (host-configurable, default 500). The player with the highest total
 score at that point wins the match.
 
+**Suggested target scores:** the winning-score setting has a big effect on
+how long a match runs, especially with fewer players. These are
+recommendations, not requirements - a table can use any allowed score, and
+players wanting a shorter game should just pick a lower target:
+
+- **2 players:** 100-200 points
+- **3-4 players:** 200-400 points
+- **5-6 players:** around 500 points
+
+Higher target scores mean longer games, particularly at the low end of the
+player-count range.
+
 ## Accessibility Note
 
 Because melds are visible to every player at a glance, but there is no
 sighted equivalent for a screen-reader user, this implementation adds a
 dedicated keyboard scheme: press a number key **1** through **6** at any
 time to have that seat's melds read aloud and set as your lay-off target,
-then press **L** to lay off your marked cards onto it. See the in-game help
-overlay (press **?**) for the complete list of keyboard shortcuts.
+then press **L** to lay off your marked cards onto it. When a table has
+Draw the Entire Discard Pile enabled, press **E** to take the whole pile
+during your draw step - the same action as the Draw Pile button. See the
+in-game help overlay (press **?**) for the complete list of keyboard
+shortcuts.
