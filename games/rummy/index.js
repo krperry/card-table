@@ -310,7 +310,16 @@ module.exports = function createRummyGame(deps) {
       return;
     }
 
-    const decision = bots.chooseMeldsAndLayoffs(table.game.hands[playerIndex], table.game.melds, playerIndex);
+    // minOpponentHandSize feeds the bot's "opponent is nearly out" Joker
+    // aggressiveness rule (see games/rummy/bots.js's scoreJokerPlay()) -
+    // computed fresh each turn straight from the authoritative hand sizes,
+    // never cached.
+    const opponentHandSizes = table.game.hands
+      .filter(function (_, index) { return index !== playerIndex; })
+      .map(function (opponentHand) { return opponentHand.length; });
+    const botContext = { minOpponentHandSize: opponentHandSizes.length ? Math.min.apply(null, opponentHandSizes) : null };
+
+    const decision = bots.chooseMeldsAndLayoffs(table.game.hands[playerIndex], table.game.melds, playerIndex, botContext);
     for (let i = 0; i < decision.melds.length; i++) {
       if (!stillBotsTurn(table, playerIndex)) {
         return;
@@ -487,54 +496,79 @@ module.exports = function createRummyGame(deps) {
 
     // Simulate against a deep copy first so the whole batch either lands or
     // rejects together - never partially apply. A screen-reader user needs a
-    // single clear reason for a rejected batch, not a half-applied one. A
-    // card that exactly matches what a Joker already in the group is
-    // standing in for triggers an automatic swap - see
-    // rules.findJokerSwapTarget() - rather than a plain extension, and is
-    // checked first since it's the more specific case (canExtendMeld would
-    // often say no to the very same card, e.g. a run slot a Joker already
-    // fills - see its header comment).
+    // single clear reason for a rejected batch, not a half-applied one.
+    //
+    // Two passes:
+    //  1) Joker swaps - a selected real card that exactly matches what a
+    //     Joker already in a group is standing in for takes that Joker's
+    //     place (rules.findJokerSwapTarget()). This never grows the group
+    //     and is unambiguous (there's exactly one slot a given card can
+    //     swap into), so it's resolved per-card first, same as before.
+    //  2) Batch growth - whatever's left is matched against groups via
+    //     rules.findBestJokerAssignment(), which evaluates the WHOLE
+    //     remaining selection against a group at once instead of one card
+    //     at a time. That's what fixes the "what does a selected Joker
+    //     represent" ambiguity: e.g. against an existing 5S-6S-7S run,
+    //     selecting Joker+9S must resolve the Joker as 8S (so 9S can also
+    //     attach), not as 4S (the first legal position a card-by-card pass
+    //     would have found) - see rules.findBestJokerAssignment()'s header.
+    //     Repeatedly picking whichever group can currently absorb the most
+    //     of what's left also lets a batch spanning more than one of the
+    //     target's groups (e.g. some cards for a run, others for a set)
+    //     resolve correctly.
     const simulatedGroups = targetGroups.map(function (group) { return { type: group.type, cards: group.cards.slice() }; });
     const assignments = [];
-    for (let i = 0; i < cards.length; i++) {
-      const card = cards[i];
-      let attachedGroupIndex = -1;
-      let jokerToReturn = null;
+    let remainingCards = cards.slice();
+
+    for (let i = remainingCards.length - 1; i >= 0; i--) {
+      const card = remainingCards[i];
       for (let g = 0; g < simulatedGroups.length; g++) {
         const swapJoker = rules.findJokerSwapTarget(simulatedGroups[g], card);
         if (swapJoker) {
-          attachedGroupIndex = g;
-          jokerToReturn = swapJoker;
+          simulatedGroups[g].cards.splice(simulatedGroups[g].cards.indexOf(swapJoker), 1);
+          simulatedGroups[g].cards.push(card);
+          assignments.push({ card: card, groupIndex: g, jokerToReturn: swapJoker });
+          remainingCards.splice(i, 1);
           break;
         }
-        if (rules.canExtendMeld(simulatedGroups[g], card)) {
-          attachedGroupIndex = g;
-          break;
+      }
+    }
+
+    while (remainingCards.length) {
+      let bestGroupIndex = -1;
+      let bestAssignment = null;
+      for (let g = 0; g < simulatedGroups.length; g++) {
+        const assignment = rules.findBestJokerAssignment(simulatedGroups[g], remainingCards);
+        if (assignment.cards.length && (!bestAssignment || assignment.cards.length > bestAssignment.cards.length)) {
+          bestAssignment = assignment;
+          bestGroupIndex = g;
         }
       }
-      if (attachedGroupIndex === -1) {
-        io.to(actingId).emit('rummyLayOffResult', { success: false, message: rules.cardName(card) + ' cannot be laid off onto that player’s melds' });
-        return;
+      if (!bestAssignment) {
+        break;
       }
-      const simGroup = simulatedGroups[attachedGroupIndex];
-      if (jokerToReturn) {
-        simGroup.cards.splice(simGroup.cards.indexOf(jokerToReturn), 1);
-      }
-      simGroup.cards.push(card);
-      assignments.push({ groupIndex: attachedGroupIndex, jokerToReturn: jokerToReturn });
+      simulatedGroups[bestGroupIndex].cards = simulatedGroups[bestGroupIndex].cards.concat(bestAssignment.cards);
+      bestAssignment.cards.forEach(function (card) {
+        assignments.push({ card: card, groupIndex: bestGroupIndex, jokerToReturn: null });
+        remainingCards.splice(remainingCards.indexOf(card), 1);
+      });
+    }
+
+    if (remainingCards.length) {
+      io.to(actingId).emit('rummyLayOffResult', { success: false, message: rules.cardName(remainingCards[0]) + ' cannot be laid off onto that player’s melds' });
+      return;
     }
 
     const returnedJokers = [];
-    cards.forEach(function (card, i) {
-      hand.splice(hand.indexOf(card), 1);
-      const assignment = assignments[i];
+    assignments.forEach(function (assignment) {
+      hand.splice(hand.indexOf(assignment.card), 1);
       const group = targetGroups[assignment.groupIndex];
       if (assignment.jokerToReturn) {
         group.cards.splice(group.cards.indexOf(assignment.jokerToReturn), 1);
         hand.push(assignment.jokerToReturn);
         returnedJokers.push(assignment.jokerToReturn);
       }
-      group.cards.push(card);
+      group.cards.push(assignment.card);
     });
 
     const player = table.players[playerIndex];

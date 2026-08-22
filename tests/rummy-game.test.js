@@ -717,3 +717,71 @@ test('laying off a real card onto a slot a Joker is filling swaps the Joker back
     child.kill('SIGTERM');
   }
 });
+
+test('selecting a Joker plus a card past the gap it fills lays off both together, resolving the Joker to the card that makes that possible', async () => {
+  const port = 3208;
+  const child = startChild(port);
+  const sockets = [];
+
+  try {
+    await waitForServer(child, port);
+    const p1 = await connectAndRegister(port, `rummy-jokerbatch-p1-${Date.now()}@example.com`, `RummyJokerBatchP1${Date.now()}`);
+    const p2 = await connectAndRegister(port, `rummy-jokerbatch-p2-${Date.now()}@example.com`, `RummyJokerBatchP2${Date.now()}`);
+    sockets.push(p1.socket, p2.socket);
+
+    const table = await createRummyTable(p1.socket);
+    const joined = waitForEvent(p2.socket, 'tableState', (payload) => payload && payload.table && payload.table.id === table.id, 5000);
+    p2.socket.emit('joinTable', { tableId: table.id });
+    await joined;
+
+    const inGamePromise = waitForEvent(p1.socket, 'tableState', (payload) => payload && payload.table && payload.table.status === 'in_game', 5000);
+    p1.socket.emit('startGame');
+    const inGameTable = (await inGamePromise).table;
+
+    const p1Index = inGameTable.players.findIndex((player) => player.id === p1.socket.id);
+    const p2Index = 1 - p1Index;
+
+    // p1's existing meld: the run 5S 6S 7S. p2 selects a Joker plus 9S in
+    // one batch - a card-by-card resolution would place the Joker as 4S
+    // (the first legal position, extending the low end) and then reject 9S
+    // outright since 8S would still be missing. The whole selection must be
+    // evaluated together so the Joker resolves to 8S instead.
+    const melds = [[], []];
+    melds[p1Index] = [{ type: 'run', cards: ['5S', '6S', '7S'] }];
+
+    const hands = [[], []];
+    hands[p2Index] = ['1J', '9S', 'KC'];
+    hands[p1Index] = ['2D', '3D'];
+
+    const readyPromise = waitForEvent(p2.socket, 'rummyTurnState', (payload) => payload.turnPlayerId === p2.socket.id && payload.stockCount === 2, 5000);
+    p1.socket.emit('__testSetTableState', {
+      tableId: table.id,
+      game: {
+        phase: 'playing',
+        turnIndex: p2Index,
+        turnPhase: 'action',
+        dealerIndex: p1Index,
+        hands: hands,
+        stock: ['8C', '9C'],
+        discardPile: ['TD'],
+        melds: melds
+      },
+      emitRummyTurnState: true
+    });
+    await readyPromise;
+
+    const layoffPromise = waitForEvent(p2.socket, 'rummyLayOffResult', () => true, 5000);
+    const turnStatePromise = waitForEvent(p2.socket, 'rummyTurnState', () => true, 5000);
+    p2.socket.emit('rummyLayOffCards', { targetPlayerIndex: p1Index, cards: ['1J', '9S'] });
+    const layoffResult = await layoffPromise;
+    assert.equal(layoffResult.success, true);
+
+    const turnState = await turnStatePromise;
+    const p1Melds = turnState.melds[p1Index];
+    assert.equal(p1Melds.length, 1);
+    assert.deepEqual(p1Melds[0].cards.slice().sort(), ['1J', '5S', '6S', '7S', '9S'].sort());
+  } finally {
+    sockets.forEach((socket) => { if (socket.connected) socket.disconnect(); });
+    child.kill('SIGTERM');
+  }
+});

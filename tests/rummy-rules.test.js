@@ -278,6 +278,69 @@ test('findJokerSwapTarget: returns null with no Joker present, or when the card 
   assert.equal(rules.findJokerSwapTarget(runWithJoker, '2J'), null);
 });
 
+// --- findBestJokerAssignment: joint batch legality against an existing meld -
+
+test('findBestJokerAssignment: a Joker plus the card past the gap it fills must resolve the Joker to make BOTH cards land, not just the first legal position', () => {
+  // Existing run 5S-6S-7S; selecting Joker+9S. A card-by-card pass would
+  // place the Joker as 4S (extending the low end, the first legal spot),
+  // stranding 9S because 8S would then be missing. The whole selection must
+  // be evaluated together so the Joker resolves to 8S instead, letting both
+  // selected cards land.
+  const run = { type: 'run', cards: ['5S', '6S', '7S'] };
+  const result = rules.findBestJokerAssignment(run, ['1J', '9S']);
+  assert.deepEqual(result.cards.slice().sort(), ['1J', '9S'].sort());
+});
+
+test('findBestJokerAssignment: selecting only a Joker still succeeds (either legal end is fine - the ambiguity is a display-only tie-break elsewhere)', () => {
+  const run = { type: 'run', cards: ['5S', '6S', '7S'] };
+  const result = rules.findBestJokerAssignment(run, ['1J']);
+  assert.deepEqual(result.cards, ['1J']);
+});
+
+test('findBestJokerAssignment: a placement that lets two selected cards land beats one that only fits the Joker alone', () => {
+  const run = { type: 'run', cards: ['4H', '5H', '6H'] };
+  const twoCardResult = rules.findBestJokerAssignment(run, ['1J', '8H', '9H']);
+  // Joker=7H lets all three selected cards (Joker, 8H, 9H) land in one go.
+  assert.deepEqual(twoCardResult.cards.slice().sort(), ['1J', '8H', '9H'].sort());
+
+  const jokerOnlyResult = rules.findBestJokerAssignment(run, ['1J']);
+  assert.equal(jokerOnlyResult.cards.length, 1);
+  assert.ok(twoCardResult.cards.length > jokerOnlyResult.cards.length);
+});
+
+test('findBestJokerAssignment: prefers a natural card over a Joker when a full set has room for only one more', () => {
+  // Set already covers 3 of the 4 suits - only one slot remains. The real
+  // card that fills it and a selected Joker can't both fit (a set never
+  // exceeds 4 cards), so between the two single-card options the tie goes
+  // to the natural card, leaving the Joker unspent (rule 10).
+  const set = { type: 'set', cards: ['7C', '7D', '7H'] };
+  const result = rules.findBestJokerAssignment(set, ['7S', '1J']);
+  assert.deepEqual(result.cards, ['7S']);
+});
+
+test('findBestJokerAssignment: works for sets as well as runs', () => {
+  const set = { type: 'set', cards: ['9C', '9D'] };
+  const result = rules.findBestJokerAssignment(set, ['1J', 'KH']);
+  // KH cannot join a rank-9 set - only the Joker (filling a missing suit)
+  // should be selected.
+  assert.deepEqual(result.cards, ['1J']);
+});
+
+test('findBestJokerAssignment: multiple Jokers in the selection are evaluated together, not just the first', () => {
+  // Existing run 4H-5H; selecting two Jokers plus 8H. Filling the 6H/7H gap
+  // with both Jokers lets 8H land too - a single-Joker-at-a-time pass would
+  // only ever place one Joker (extending to 6H) and strand the rest.
+  const run = { type: 'run', cards: ['4H', '5H'] };
+  const result = rules.findBestJokerAssignment(run, ['1J', '2J', '8H']);
+  assert.deepEqual(result.cards.slice().sort(), ['1J', '2J', '8H'].sort());
+});
+
+test('findBestJokerAssignment: rejects a candidate card that has no legal position at all', () => {
+  const run = { type: 'run', cards: ['5S', '6S', '7S'] };
+  const result = rules.findBestJokerAssignment(run, ['2C']);
+  assert.deepEqual(result.cards, []);
+});
+
 test('scoreHand counts a Joker left in hand as 15 deadwood', () => {
   const hands = [[], ['1J', '5H']];
   const result = rules.scoreHand(hands, 0);

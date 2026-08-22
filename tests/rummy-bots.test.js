@@ -49,3 +49,64 @@ test('chooseMeldsAndLayoffs lays off a real card before spending a Joker on the 
   const decision = bots.chooseMeldsAndLayoffs(hand, allMelds, 0);
   assert.equal(decision.layoffs[0].cards[0], '4H');
 });
+
+// --- Joker strategy: scoring picks the best play, not the first legal one --
+
+test('chooseMeldsAndLayoffs: a Joker placement that unlocks two more cards beats one that unlocks none', () => {
+  const hand = ['1J', '8H', '9H', 'KC'];
+  const allMelds = [
+    [{ type: 'run', cards: ['4H', '5H', '6H'] }],  // seat 0: Joker(=7H) also lets 8H and 9H land
+    [{ type: 'set', cards: ['2C', '2D', '2S'] }]   // seat 1: Joker fills the missing suit, nothing else benefits
+  ];
+  const decision = bots.chooseMeldsAndLayoffs(hand, allMelds, 2);
+  assert.equal(decision.layoffs.length, 1);
+  assert.equal(decision.layoffs[0].targetPlayerIndex, 0);
+  assert.deepEqual(decision.layoffs[0].cards.slice().sort(), ['1J', '8H', '9H'].sort());
+});
+
+test('chooseMeldsAndLayoffs: evaluates every legal Joker position instead of stopping at the first one found in board order', () => {
+  const hand = ['1J', '8H', '9H', 'KC'];
+  const allMelds = [
+    [{ type: 'set', cards: ['2C', '2D', '2S'] }],  // seat 0, checked first: only the Joker fits, nothing else unlocks
+    [{ type: 'run', cards: ['4H', '5H', '6H'] }]   // seat 1: Joker(=7H) also lets 8H and 9H land - the better play
+  ];
+  const decision = bots.chooseMeldsAndLayoffs(hand, allMelds, 2);
+  assert.equal(decision.layoffs.length, 1);
+  assert.equal(decision.layoffs[0].targetPlayerIndex, 1);
+  assert.deepEqual(decision.layoffs[0].cards.slice().sort(), ['1J', '8H', '9H'].sort());
+});
+
+test('chooseMeldsAndLayoffs: prefers a Joker play on a hard-to-complete combination over an equally-valuable easy one', () => {
+  // Both real-card pairs are worth the same (9+9 = 8+10 = 18 deadwood), so
+  // if the bot just chased raw card value it would be a coin flip. The 9s
+  // have 2 natural outs (either missing suit completes the set - easy); the
+  // 8S/TS run has only 1 (exactly 9S fills the gap - hard). The Joker
+  // should go to the harder combination.
+  const hand = ['9C', '9D', '8S', 'TS', '1J'];
+  const decision = bots.chooseMeldsAndLayoffs(hand, [], 0);
+  assert.equal(decision.melds.length, 1);
+  assert.deepEqual(decision.melds[0].slice().sort(), ['1J', '8S', 'TS'].sort());
+});
+
+test('chooseMeldsAndLayoffs: uses the Joker when it lets the bot go out', () => {
+  const hand = ['7C', '7D', '1J'];
+  const decision = bots.chooseMeldsAndLayoffs(hand, [], 0);
+  assert.equal(decision.melds.length, 1);
+  assert.deepEqual(decision.melds[0].slice().sort(), ['1J', '7C', '7D'].sort());
+});
+
+test('chooseMeldsAndLayoffs: prefers melding high-value deadwood (Kings) with the Joker over low-value deadwood (2s)', () => {
+  const hand = ['KH', 'KD', '2S', '2H', '1J'];
+  const decision = bots.chooseMeldsAndLayoffs(hand, [], 0);
+  assert.equal(decision.melds.length, 1);
+  assert.deepEqual(decision.melds[0].slice().sort(), ['1J', 'KD', 'KH'].sort());
+});
+
+test('chooseMeldsAndLayoffs: uses both Jokers together on a chain when a single Joker cannot bridge the gap', () => {
+  const hand = ['1J', '2J', '8H', '9H'];
+  const allMelds = [[{ type: 'run', cards: ['3H', '4H', '5H'] }]];
+  const decision = bots.chooseMeldsAndLayoffs(hand, allMelds, 1);
+  assert.equal(decision.layoffs.length, 1);
+  assert.deepEqual(decision.layoffs[0].cards.slice().sort(), ['1J', '2J', '8H', '9H'].sort());
+  assert.equal(decision.melds.length, 0);
+});

@@ -409,6 +409,77 @@ function findJokerSwapTarget(meldGroup, card) {
   return null;
 }
 
+// Given an existing meld group and a pool of "candidate" cards a player has
+// selected (e.g. games/rummy/index.js's performLayOffCards() `cards`
+// payload, after any exact Joker swaps - see findJokerSwapTarget() above -
+// have already been pulled out), finds the largest subset of those
+// candidates that can legally join the group as a single batch. Validity is
+// decided entirely by isValidSet()/isValidRun() above - the same single
+// source of truth every other meld-legality decision in this file uses -
+// never a separate/duplicate notion of what a Joker can represent.
+//
+// This exists because deciding a Joker's role one candidate card at a time
+// (the old behavior - "does canExtendMeld() say yes to THIS card, right
+// now") locks in whichever position runEffectiveBounds() happens to pick as
+// soon as the Joker is considered, even when a different position would
+// have let more of the SAME selection attach. Example: against an existing
+// 5S-6S-7S run, selecting a Joker plus 9S needs the Joker to represent 8S so
+// 9S can also land - but a card-by-card pass sees the Joker first, and
+// runEffectiveBounds()'s "extend the low end first" convention assigns it
+// 4S, stranding 9S. Trying the group as a whole against every candidate
+// subset removes that ordering dependency: whether a subset is legal is
+// decided once, on the fully-formed result, exactly like a brand-new meld
+// is checked by classifyMeld().
+//
+// candidateCards is expected to be small (a hand is at most ~13 cards, and a
+// single lay-off selection is normally far smaller), so brute-forcing every
+// subset (2^n) is simpler and cheap, rather than a bespoke constraint
+// solver.
+//
+// Ties (more than one legal subset of the same maximum size) are broken by,
+// in order: fewer Jokers spent (never substitute a Joker for a real card the
+// selection already supplies), then whichever subset is found first
+// scanning from "every candidate included" down to "just one" (a stable,
+// deterministic, but otherwise arbitrary choice - a Joker's exact
+// represented card is genuinely ambiguous once more than one legal option
+// ties, same as runEffectiveBounds()'s own tie-break above).
+//
+// Both games/rummy/index.js's performLayOffCards() (human intent: maximize
+// how much of what the player selected can legally land) and
+// games/rummy/bots.js (bot strategy: generate a candidate play per group,
+// then score across groups/new-melds) call this - see this file's header
+// and games/rummy/bots.js's header for why the two must share one engine
+// instead of forming independent opinions about Joker legality.
+function findBestJokerAssignment(meldGroup, candidateCards) {
+  if (!meldGroup || !Array.isArray(meldGroup.cards) || !meldGroup.cards.length) {
+    return { cards: [] };
+  }
+  const validate = meldGroup.type === 'set' ? isValidSet : meldGroup.type === 'run' ? isValidRun : null;
+  const pool = Array.isArray(candidateCards) ? candidateCards.filter(function (c) { return typeof c === 'string'; }) : [];
+  if (!validate || !pool.length) {
+    return { cards: [] };
+  }
+
+  const n = pool.length;
+  let best = null;
+  for (let mask = (1 << n) - 1; mask >= 1; mask--) {
+    const subset = [];
+    for (let i = 0; i < n; i++) {
+      if (mask & (1 << i)) {
+        subset.push(pool[i]);
+      }
+    }
+    if (!validate(meldGroup.cards.concat(subset))) {
+      continue;
+    }
+    const jokerCount = subset.filter(isJoker).length;
+    if (!best || subset.length > best.cards.length || (subset.length === best.cards.length && jokerCount < best.jokerCount)) {
+      best = { cards: subset, jokerCount: jokerCount };
+    }
+  }
+  return best ? { cards: best.cards } : { cards: [] };
+}
+
 function isStockExhausted(stock) {
   return !Array.isArray(stock) || stock.length === 0;
 }
@@ -487,6 +558,7 @@ module.exports = {
   classifyMeld: classifyMeld,
   canExtendMeld: canExtendMeld,
   findJokerSwapTarget: findJokerSwapTarget,
+  findBestJokerAssignment: findBestJokerAssignment,
   isStockExhausted: isStockExhausted,
   reshuffleDiscardIntoStock: reshuffleDiscardIntoStock,
   scoreHand: scoreHand,
