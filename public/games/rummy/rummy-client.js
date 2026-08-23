@@ -653,30 +653,32 @@ function rummyRebuildCardButtons(container, items, buildButton, updateButton) {
     return;
   }
 
+  // The appendChild loop above runs unconditionally on every button so the
+  // grid's DOM order always matches the current display order - but per the
+  // DOM "insert" algorithm, appendChild-ing a node that's already attached
+  // always removes it from the tree before reinserting it, even when its
+  // position doesn't actually change. That silently blurs it with no native
+  // focus/blur pair a screen reader narrates, so the previously-focused
+  // button (even the SAME card, same identity) is never still focused at
+  // this point - it must always be explicitly refocused below, never
+  // assumed to have survived the reorder.
+  let target;
   if (focusedCard && keptCards[focusedCard]) {
-    // The focused card is still in hand, on the exact same DOM node as
-    // before (see above) - it never actually lost focus, so just make it
-    // the tab stop again. No .focus() call here on purpose: calling it
-    // again on an element that's already focused is a no-op for focus
-    // itself, but risks some screen readers re-announcing it anyway.
+    target = nextButtons.find(function (button) { return button.dataset.card === focusedCard; });
     nextButtons.forEach(function (button) { button.tabIndex = button.dataset.card === focusedCard ? 0 : -1; });
-    return;
+  } else {
+    // The focused card is gone (discarded, melded, or laid off) - fall back
+    // to the same grid position, same as before, so navigation stays put
+    // instead of dropping out of the table.
+    const restoreIndex = Math.min(focusedIndex >= 0 ? focusedIndex : 0, nextButtons.length - 1);
+    target = nextButtons[restoreIndex];
+    target.tabIndex = 0;
   }
-
-  // The focused card is gone (discarded, melded, or laid off) - its node was
-  // genuinely removed, so keyboard focus already left the hand grid. Fall
-  // back to the same grid position, same as before, so navigation stays put
-  // instead of dropping out of the table - but this IS a real, new focus
-  // target, and calling .focus() on it as-is would make the screen reader
-  // announce ITS card name (e.g. the card that shifted into the discarded
-  // card's old slot), stepping on the "You discard/meld/lay off ..."
-  // message this action is supposed to produce instead. Blank the
-  // accessible name for the one frame the focus event fires on, then
-  // restore it right after - later arrow-key navigation onto this same
-  // button still reads its real card name normally.
-  const restoreIndex = Math.min(focusedIndex >= 0 ? focusedIndex : 0, nextButtons.length - 1);
-  const target = nextButtons[restoreIndex];
-  target.tabIndex = 0;
+  // rummyFocusSilently (not a plain .focus()) either way: refocusing a node
+  // the reorder above just blurred is a genuine new focus event, and without
+  // blanking its accessible name first a screen reader would announce that
+  // card's name, stepping on the caller's own "You draw/discard/meld/lay off
+  // ..." srSpeak() message that's supposed to be the only thing heard.
   rummyFocusSilently(target);
 }
 
