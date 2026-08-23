@@ -61,6 +61,24 @@ module.exports = function createRummyGame(deps) {
   const DEFAULT_TARGET_SCORE = 500;
   const BOT_MOVE_DELAY_MS = Math.max(0, parseInt(process.env.BOT_MOVE_DELAY_MS || '900', 10));
 
+  // Mirrors games/lumo/index.js's computerPlayers setting: a host-chosen
+  // maximum number of computer players to add when the game starts, read
+  // fresh from matchSettings at startGame() time (see startGame()'s header
+  // comment) rather than reserved at table-creation time. The table-creation
+  // UI only ever offers 1-5 (see public/index.html's
+  // new-table-rummy-computer-players select) and defaults to 1 so a lone host
+  // can always start a two-player game - see the Default section of the "Add
+  // Configurable Computer Players to Rummy Table Creation" issue. The clamp
+  // here still accepts 0 (below what the UI can ever send) purely so tests
+  // can opt a table out of the default bot entirely to isolate unrelated
+  // mechanics - see tests/rummy-game.test.js/tests/rummy-draw-pile.test.js's
+  // `{ rummyComputerPlayers: 0 }` table-creation calls.
+  const MIN_COMPUTER_PLAYERS_SETTING = 0;
+  const MAX_COMPUTER_PLAYERS = 5;
+  const DEFAULT_COMPUTER_PLAYERS = 1;
+  const MIN_TABLE_PLAYERS = 2;
+  const MAX_TABLE_PLAYERS = 6;
+
   function normalizeMatchSettings(payload) {
     return {
       targetScore: clampInteger(payload && payload.rummyTargetScore, MIN_TARGET_SCORE, MAX_TARGET_SCORE, DEFAULT_TARGET_SCORE),
@@ -70,7 +88,8 @@ module.exports = function createRummyGame(deps) {
       // when the host explicitly checks the box (see public/index.html's
       // rummy-table-settings and public/main.js's createTable()).
       allowDrawEntirePile: !!(payload && payload.rummyAllowDrawEntirePile),
-      aceHighOrLow: !!(payload && payload.rummyAceHighOrLow)
+      aceHighOrLow: !!(payload && payload.rummyAceHighOrLow),
+      computerPlayers: clampInteger(payload && payload.rummyComputerPlayers, MIN_COMPUTER_PLAYERS_SETTING, MAX_COMPUTER_PLAYERS, DEFAULT_COMPUTER_PLAYERS)
     };
   }
 
@@ -79,7 +98,8 @@ module.exports = function createRummyGame(deps) {
     return {
       targetScore: clampInteger(matchSettings.targetScore, MIN_TARGET_SCORE, MAX_TARGET_SCORE, DEFAULT_TARGET_SCORE),
       allowDrawEntirePile: !!matchSettings.allowDrawEntirePile,
-      aceHighOrLow: !!matchSettings.aceHighOrLow
+      aceHighOrLow: !!matchSettings.aceHighOrLow,
+      computerPlayers: clampInteger(matchSettings.computerPlayers, MIN_COMPUTER_PLAYERS_SETTING, MAX_COMPUTER_PLAYERS, DEFAULT_COMPUTER_PLAYERS)
     };
   }
 
@@ -952,12 +972,28 @@ module.exports = function createRummyGame(deps) {
   }
 
   // Rummy's variable 2-6 player count means it can't follow Hearts/Spades/
-  // Cribbage's "always pad to a fixed PLAYER_COUNT" pattern - a 3-6 human
-  // table starts as-is. Only the single-human case needs a bot, to make a
-  // legal 2-player game.
+  // Cribbage's "always pad to a fixed PLAYER_COUNT" pattern. Instead it
+  // follows games/lumo/index.js's model: the host picks a computer-player
+  // COUNT (not reserved seats) at table creation, and startGame() decides how
+  // many bots to actually add based on how many humans have joined by the
+  // time Start Game is pressed - never more than fit in the 6-player maximum,
+  // and never fewer than needed to reach the 2-player minimum (a lone host
+  // always gets at least one bot, even though the table-creation control only
+  // offers 1-5, in case matchSettings.computerPlayers is ever missing/0 -
+  // e.g. a table created before this setting existed). See the "Add
+  // Configurable Computer Players to Rummy Table Creation" issue for the
+  // exact seat-math this mirrors.
   function startGame(table) {
-    if (table.players.length === 1) {
-      addComputerPlayersToTable(table, 1, 'random');
+    const settings = getMatchSettings(table);
+    const humanCount = table.players.length;
+    const openSeats = Math.max(0, MAX_TABLE_PLAYERS - humanCount);
+    let botCount = Math.min(settings.computerPlayers, openSeats);
+    if (humanCount + botCount < MIN_TABLE_PLAYERS) {
+      botCount = Math.min(openSeats, MIN_TABLE_PLAYERS - humanCount);
+    }
+
+    if (botCount > 0) {
+      addComputerPlayersToTable(table, botCount, 'random');
     }
 
     table.status = 'in_game';
@@ -1170,8 +1206,8 @@ module.exports = function createRummyGame(deps) {
   return {
     type: 'rummy',
     name: 'Rummy',
-    minPlayers: 2,
-    maxPlayers: 6,
+    minPlayers: MIN_TABLE_PLAYERS,
+    maxPlayers: MAX_TABLE_PLAYERS,
     normalizeMatchSettings: normalizeMatchSettings,
     getMatchSettings: getMatchSettings,
     initializeGameState: initializeGameState,

@@ -135,7 +135,7 @@ test('with allowDrawEntirePile off, rummyDrawDiscardPile is rejected and ordinar
     const p2 = await connectAndRegister(port, `rummy-pile-off-p2-${Date.now()}@example.com`, `RummyPileOffP2${Date.now()}`);
     sockets.push(p1.socket, p2.socket);
 
-    const table = await createRummyTable(p1.socket);
+    const table = await createRummyTable(p1.socket, { rummyComputerPlayers: 0 });
     const joined = waitForEvent(p2.socket, 'tableState', (payload) => payload && payload.table && payload.table.id === table.id, 5000);
     p2.socket.emit('joinTable', { tableId: table.id });
     await joined;
@@ -200,7 +200,7 @@ test('with allowDrawEntirePile on, a player can take the whole pile into their h
     const p2 = await connectAndRegister(port, `rummy-pile-on-p2-${Date.now()}@example.com`, `RummyPileOnP2${Date.now()}`);
     sockets.push(p1.socket, p2.socket);
 
-    const table = await createRummyTable(p1.socket, { rummyAllowDrawEntirePile: true });
+    const table = await createRummyTable(p1.socket, { rummyAllowDrawEntirePile: true, rummyComputerPlayers: 0 });
     const joined = waitForEvent(p2.socket, 'tableState', (payload) => payload && payload.table && payload.table.id === table.id, 5000);
     p2.socket.emit('joinTable', { tableId: table.id });
     await joined;
@@ -268,7 +268,7 @@ test('rummyDrawDiscardPile is rejected off-turn and outside the draw phase, even
     const p2 = await connectAndRegister(port, `rummy-pile-phase-p2-${Date.now()}@example.com`, `RummyPilePhaseP2${Date.now()}`);
     sockets.push(p1.socket, p2.socket);
 
-    const table = await createRummyTable(p1.socket, { rummyAllowDrawEntirePile: true });
+    const table = await createRummyTable(p1.socket, { rummyAllowDrawEntirePile: true, rummyComputerPlayers: 0 });
     const joined = waitForEvent(p2.socket, 'tableState', (payload) => payload && payload.table && payload.table.id === table.id, 5000);
     p2.socket.emit('joinTable', { tableId: table.id });
     await joined;

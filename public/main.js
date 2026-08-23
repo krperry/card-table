@@ -143,6 +143,7 @@ const el = {
   rummyPanel: document.getElementById('rummy-panel'),
   rummyTableSettings: document.getElementById('rummy-table-settings'),
   newTableRummyTargetScore: document.getElementById('new-table-rummy-target-score'),
+  newTableRummyComputerPlayers: document.getElementById('new-table-rummy-computer-players'),
   rummyAllowDrawEntirePile: document.getElementById('rummy-allow-draw-entire-pile'),
   rummyAceHighOrLow: document.getElementById('rummy-ace-high-or-low'),
   helpOverlay: document.getElementById('help-overlay'),
@@ -868,6 +869,7 @@ function createTable() {
   const targetScore = parseInt(el.newTableTargetScore && el.newTableTargetScore.value, 10);
   const cribbageTargetScore = parseInt(el.newTableCribbageTargetScore && el.newTableCribbageTargetScore.value, 10);
   const rummyTargetScore = parseInt(el.newTableRummyTargetScore && el.newTableRummyTargetScore.value, 10);
+  const rummyComputerPlayers = parseInt(el.newTableRummyComputerPlayers && el.newTableRummyComputerPlayers.value, 10);
 
   socket.emit('createTable', {
     name: tableName,
@@ -883,6 +885,7 @@ function createTable() {
     targetScore: Number.isFinite(targetScore) ? targetScore : undefined,
     cribbageTargetScore: Number.isFinite(cribbageTargetScore) ? cribbageTargetScore : undefined,
     rummyTargetScore: Number.isFinite(rummyTargetScore) ? rummyTargetScore : undefined,
+    rummyComputerPlayers: Number.isFinite(rummyComputerPlayers) ? rummyComputerPlayers : undefined,
     rummyAllowDrawEntirePile: !!(el.rummyAllowDrawEntirePile && el.rummyAllowDrawEntirePile.checked),
     rummyAceHighOrLow: !!(el.rummyAceHighOrLow && el.rummyAceHighOrLow.checked)
   });
@@ -1503,7 +1506,8 @@ function render() {
         if (matchSettings.aceHighOrLow) {
           rummyRules.push('Ace high or low');
         }
-        el.tableMatchSettings.textContent = 'Target score: ' + (matchSettings.targetScore || 500) + handText + (rummyRules.length ? ' | ' + rummyRules.join(', ') : '');
+        const computerPlayersText = ' | Computer players: Up to ' + (matchSettings.computerPlayers || 1);
+        el.tableMatchSettings.textContent = 'Target score: ' + (matchSettings.targetScore || 500) + handText + computerPlayersText + (rummyRules.length ? ' | ' + rummyRules.join(', ') : '');
       } else {
         const roundText = appState.gameStatus === 'in_game' && typeof appState.currentTable.roundNumber === 'number'
           ? ' | This is round ' + appState.currentTable.roundNumber + ' of ' + matchSettings.maxRounds
@@ -1524,8 +1528,9 @@ function render() {
       // Hearts, Spades, and Cribbage all always fill to their fixed seat
       // count with computer players when the host starts, so there is no
       // minimum-player gate to enforce here. Rummy is variable (2-6 seats),
-      // but its own startGame() only ever needs to pad a lone human up to
-      // two, so starting is likewise never blocked on player count.
+      // but its own startGame() always tops a lone human up to at least two
+      // players (see the Rummy computer-players hint below), so starting is
+      // likewise never blocked on player count.
       el.startGameBtn.disabled = !appState.isHost || appState.gameStatus === 'in_game';
     } else {
       const computerPlayerCount = (appState.currentTable.matchSettings && appState.currentTable.matchSettings.computerPlayers) || 0;
@@ -1538,10 +1543,19 @@ function render() {
       // this note is only needed for the fixed-seat-count games, and only
       // while still waiting to start (once in_game the seats are settled).
       if (appState.gameStatus !== 'in_game' && isRummy) {
-        // Rummy's player count is variable (2-6) - a bot is only ever added
-        // to top up a lone human to two, so the hint only applies then.
-        el.tableStartHint.textContent = appState.currentTable.players.length === 1
-          ? 'This game needs at least two players. Starting now will add one computer player.'
+        // Rummy's player count is variable (2-6) - mirror the same
+        // humanCount/openSeats/2-player-floor math games/rummy/index.js's
+        // startGame() applies, so the hint always matches what Start Game is
+        // about to actually do.
+        const configuredComputerPlayers = (appState.currentTable.matchSettings && appState.currentTable.matchSettings.computerPlayers) || 1;
+        const humanCount = appState.currentTable.players.length;
+        const openSeats = Math.max(0, 6 - humanCount);
+        let botsToAdd = Math.min(configuredComputerPlayers, openSeats);
+        if (humanCount + botsToAdd < 2) {
+          botsToAdd = Math.min(openSeats, 2 - humanCount);
+        }
+        el.tableStartHint.textContent = botsToAdd > 0
+          ? ('Starting now will add ' + botsToAdd + ' computer player' + (botsToAdd === 1 ? '' : 's') + '.')
           : '';
       } else if (appState.gameStatus !== 'in_game' && (isHearts || isSpades || isCribbage)) {
         const neededSeats = isCribbage ? 2 : 4;

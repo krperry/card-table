@@ -167,6 +167,15 @@
                 <option value="500" selected>500 (standard game)</option>
               </select>
             </label>
+            <label class="inline-label" for="new-table-rummy-computer-players">Computer players
+              <select id="new-table-rummy-computer-players">
+                <option value="1" selected>1</option>
+                <option value="2">2</option>
+                <option value="3">3</option>
+                <option value="4">4</option>
+                <option value="5">5</option>
+              </select>
+            </label>
           </div>
           <div class="checkbox-row">
             <label class="inline-label" for="rummy-allow-draw-entire-pile">
@@ -180,7 +189,7 @@
               Ace High or Low
             </label>
           </div>
-          <p class="hint">Rummy seats 2-6 players. If only one player has joined, starting the table fills the second seat with a computer player - tables of three or more start as-is.</p>
+          <p class="hint">Rummy seats 2-6 players. Computer players choose the maximum number of computer players to add when the game starts - starting now will always add at least one if you are alone, and the table will never exceed six total players.</p>
         </div>
         <div class="row">
           <button id="create-table-btn" type="button">Create Table</button>

@@ -154,7 +154,7 @@ test('a full draw -> meld -> lay-off -> discard turn cycle works over the socket
     const p2 = await connectAndRegister(port, `rummy-cycle-p2-${Date.now()}@example.com`, `RummyCycleP2${Date.now()}`);
     sockets.push(p1.socket, p2.socket);
 
-    const table = await createRummyTable(p1.socket);
+    const table = await createRummyTable(p1.socket, { rummyComputerPlayers: 0 });
     const joined = waitForEvent(p2.socket, 'tableState', (payload) => payload && payload.table && payload.table.id === table.id, 5000);
     p2.socket.emit('joinTable', { tableId: table.id });
     await joined;
@@ -404,7 +404,7 @@ test('reconnecting mid-hand-summary migrates the pending ack off the old socket 
     sockets.push(p1.socket, p2.socket);
     const rememberToken = p1.payload.rememberToken;
 
-    const table = await createRummyTable(p1.socket);
+    const table = await createRummyTable(p1.socket, { rummyComputerPlayers: 0 });
     const joined = waitForEvent(p2.socket, 'tableState', (payload) => payload && payload.table && payload.table.id === table.id, 5000);
     p2.socket.emit('joinTable', { tableId: table.id });
     await joined;
@@ -489,7 +489,7 @@ test('rummyTurnState messages tell a blind player where a draw came from (withou
     const p2 = await connectAndRegister(port, `rummy-announce-p2-${Date.now()}@example.com`, `RummyAnnounceP2${Date.now()}`);
     sockets.push(p1.socket, p2.socket);
 
-    const table = await createRummyTable(p1.socket);
+    const table = await createRummyTable(p1.socket, { rummyComputerPlayers: 0 });
     const joined = waitForEvent(p2.socket, 'tableState', (payload) => payload && payload.table && payload.table.id === table.id, 5000);
     p2.socket.emit('joinTable', { tableId: table.id });
     await joined;
@@ -576,7 +576,7 @@ test("a bot's draw and discard - which run synchronously back-to-back within a s
     const p1 = await connectAndRegister(port, `rummy-bot-announce-${Date.now()}@example.com`, `RummyBotAnnounce${Date.now()}`);
     sockets.push(p1.socket);
 
-    const table = await createRummyTable(p1.socket);
+    const table = await createRummyTable(p1.socket, { rummyComputerPlayers: 0 });
 
     const inGamePromise = waitForEvent(p1.socket, 'tableState', (payload) => payload && payload.table && payload.table.status === 'in_game', 5000);
     p1.socket.emit('startGame');
@@ -636,7 +636,7 @@ test('laying off a real card onto a slot a Joker is filling swaps the Joker back
     const p2 = await connectAndRegister(port, `rummy-jokerswap-p2-${Date.now()}@example.com`, `RummyJokerSwapP2${Date.now()}`);
     sockets.push(p1.socket, p2.socket);
 
-    const table = await createRummyTable(p1.socket);
+    const table = await createRummyTable(p1.socket, { rummyComputerPlayers: 0 });
     const joined = waitForEvent(p2.socket, 'tableState', (payload) => payload && payload.table && payload.table.id === table.id, 5000);
     p2.socket.emit('joinTable', { tableId: table.id });
     await joined;
@@ -729,7 +729,7 @@ test('selecting a Joker plus a card past the gap it fills lays off both together
     const p2 = await connectAndRegister(port, `rummy-jokerbatch-p2-${Date.now()}@example.com`, `RummyJokerBatchP2${Date.now()}`);
     sockets.push(p1.socket, p2.socket);
 
-    const table = await createRummyTable(p1.socket);
+    const table = await createRummyTable(p1.socket, { rummyComputerPlayers: 0 });
     const joined = waitForEvent(p2.socket, 'tableState', (payload) => payload && payload.table && payload.table.id === table.id, 5000);
     p2.socket.emit('joinTable', { tableId: table.id });
     await joined;
@@ -797,7 +797,7 @@ test('a genuinely ambiguous meld selection (8S, Joker, Joker) asks the player to
     const p2 = await connectAndRegister(port, `rummy-meldchoice-p2-${Date.now()}@example.com`, `RummyMeldChoiceP2${Date.now()}`);
     sockets.push(p1.socket, p2.socket);
 
-    const table = await createRummyTable(p1.socket);
+    const table = await createRummyTable(p1.socket, { rummyComputerPlayers: 0 });
     const joined = waitForEvent(p2.socket, 'tableState', (payload) => payload && payload.table && payload.table.id === table.id, 5000);
     p2.socket.emit('joinTable', { tableId: table.id });
     await joined;
@@ -882,7 +882,7 @@ test('an unambiguous meld with a Joker in the middle of the selection resolves a
     const p2 = await connectAndRegister(port, `rummy-meldorder-p2-${Date.now()}@example.com`, `RummyMeldOrderP2${Date.now()}`);
     sockets.push(p1.socket, p2.socket);
 
-    const table = await createRummyTable(p1.socket, { rummyAceHighOrLow: true });
+    const table = await createRummyTable(p1.socket, { rummyAceHighOrLow: true, rummyComputerPlayers: 0 });
     const joined = waitForEvent(p2.socket, 'tableState', (payload) => payload && payload.table && payload.table.id === table.id, 5000);
     p2.socket.emit('joinTable', { tableId: table.id });
     await joined;
@@ -947,7 +947,7 @@ test('a set Joker is generic by suit end-to-end: melding "8H, 8D, Joker" then la
     const p2 = await connectAndRegister(port, `rummy-setjoker-p2-${Date.now()}@example.com`, `RummySetJokerP2${Date.now()}`);
     sockets.push(p1.socket, p2.socket);
 
-    const table = await createRummyTable(p1.socket);
+    const table = await createRummyTable(p1.socket, { rummyComputerPlayers: 0 });
     const joined = waitForEvent(p2.socket, 'tableState', (payload) => payload && payload.table && payload.table.id === table.id, 5000);
     p2.socket.emit('joinTable', { tableId: table.id });
     await joined;
@@ -1034,7 +1034,7 @@ test('laying off a card that legally fits more than one existing meld asks the p
     const p2 = await connectAndRegister(port, `rummy-layoffchoice-p2-${Date.now()}@example.com`, `RummyLayoffChoiceP2${Date.now()}`);
     sockets.push(p1.socket, p2.socket);
 
-    const table = await createRummyTable(p1.socket, { rummyAceHighOrLow: true });
+    const table = await createRummyTable(p1.socket, { rummyAceHighOrLow: true, rummyComputerPlayers: 0 });
     const joined = waitForEvent(p2.socket, 'tableState', (payload) => payload && payload.table && payload.table.id === table.id, 5000);
     p2.socket.emit('joinTable', { tableId: table.id });
     await joined;
@@ -1119,7 +1119,7 @@ test('choosing the other meldChoiceIndex for the same ambiguous layoff sends the
     const p2 = await connectAndRegister(port, `rummy-layoffchoice2-p2-${Date.now()}@example.com`, `RummyLOChoice2P2${Date.now()}`);
     sockets.push(p1.socket, p2.socket);
 
-    const table = await createRummyTable(p1.socket, { rummyAceHighOrLow: true });
+    const table = await createRummyTable(p1.socket, { rummyAceHighOrLow: true, rummyComputerPlayers: 0 });
     const joined = waitForEvent(p2.socket, 'tableState', (payload) => payload && payload.table && payload.table.id === table.id, 5000);
     p2.socket.emit('joinTable', { tableId: table.id });
     await joined;
@@ -1198,7 +1198,7 @@ test('the acting player\'s own rummyDrawResult/rummyDiscardResult carry the exac
     const p2 = await connectAndRegister(port, `rummy-single-announce-p2-${Date.now()}@example.com`, `RmyAnnP2${Date.now()}`);
     sockets.push(p1.socket, p2.socket);
 
-    const table = await createRummyTable(p1.socket);
+    const table = await createRummyTable(p1.socket, { rummyComputerPlayers: 0 });
     const joined = waitForEvent(p2.socket, 'tableState', (payload) => payload && payload.table && payload.table.id === table.id, 5000);
     p2.socket.emit('joinTable', { tableId: table.id });
     await joined;
@@ -1273,6 +1273,132 @@ test('the acting player\'s own rummyDrawResult/rummyDiscardResult carry the exac
     assert.equal(p2OwnTurnStateAfterDraw.message, null);
   } finally {
     sockets.forEach((socket) => { if (socket.connected) socket.disconnect(); });
+    child.kill('SIGTERM');
+  }
+});
+
+// Coverage for the "Add Configurable Computer Players to Rummy Table
+// Creation" issue: matchSettings.computerPlayers (the new
+// new-table-rummy-computer-players select, mirroring games/lumo/index.js's
+// own computerPlayers setting) is read fresh at startGame() time, not
+// reserved at table-creation time - see games/rummy/index.js's startGame()
+// header comment. Every example from that issue is exercised here, using a
+// single pool of 6 already-connected human sockets across all 8 scenarios
+// (each scenario creates its own table, joins however many of the pool it
+// needs, starts, asserts, then every joined human leaves so the next
+// scenario starts against a clean lobby).
+test('Rummy startGame adds up to the configured number of computer players, capped at six total players and floored at two', async () => {
+  const port = 3215;
+  const child = startChild(port);
+  const sockets = [];
+
+  try {
+    await waitForServer(child, port);
+    for (let i = 0; i < 6; i++) {
+      const conn = await connectAndRegister(port, `rummy-cap-h${i}-${Date.now()}@example.com`, `RmyCapH${i}${Date.now()}`);
+      sockets.push(conn.socket);
+    }
+
+    const scenarios = [
+      { humans: 1, selected: 1, expectedBots: 1, expectedTotal: 2 },
+      { humans: 1, selected: 5, expectedBots: 5, expectedTotal: 6 },
+      { humans: 2, selected: 2, expectedBots: 2, expectedTotal: 4 },
+      { humans: 2, selected: 5, expectedBots: 4, expectedTotal: 6 },
+      { humans: 3, selected: 5, expectedBots: 3, expectedTotal: 6 },
+      { humans: 4, selected: 2, expectedBots: 2, expectedTotal: 6 },
+      { humans: 5, selected: 5, expectedBots: 1, expectedTotal: 6 },
+      { humans: 6, selected: 5, expectedBots: 0, expectedTotal: 6 }
+    ];
+
+    for (let s = 0; s < scenarios.length; s++) {
+      const scenario = scenarios[s];
+      const tableName = `Rummy Cap ${s}-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
+      const host = sockets[0];
+
+      const createdPromise = waitForEvent(host, 'tableState', (payload) => payload && payload.table && payload.table.name === tableName, 5000)
+        .then((payload) => payload.table);
+      host.emit('createTable', { name: tableName, gameType: 'rummy', rummyComputerPlayers: scenario.selected });
+      const table = await createdPromise;
+
+      for (let i = 1; i < scenario.humans; i++) {
+        const joinedPromise = waitForEvent(sockets[i], 'tableState', (payload) => payload && payload.table && payload.table.id === table.id, 5000);
+        sockets[i].emit('joinTable', { tableId: table.id });
+        await joinedPromise;
+      }
+
+      const inGamePromise = waitForEvent(host, 'tableState', (payload) => payload && payload.table && payload.table.status === 'in_game', 5000);
+      host.emit('startGame');
+      const inGameTable = (await inGamePromise).table;
+
+      const bots = inGameTable.players.filter((player) => player.isBot);
+      const humans = inGameTable.players.filter((player) => !player.isBot);
+      assert.equal(inGameTable.players.length, scenario.expectedTotal, `scenario ${s} (${scenario.humans} humans, selected ${scenario.selected}): total players`);
+      assert.equal(bots.length, scenario.expectedBots, `scenario ${s}: bot count`);
+      assert.equal(humans.length, scenario.humans, `scenario ${s}: human count`);
+      // Every bot gets a unique name from the existing Rummy bot-naming
+      // convention (games/rummy uses server.js's shared pickBotNames()/
+      // addComputerPlayersToTable() - same as Lumo, not a bespoke bot type).
+      assert.equal(new Set(bots.map((bot) => bot.name)).size, bots.length, `scenario ${s}: bot names are unique`);
+
+      // Leave the table so the next scenario starts clean - the last human
+      // to leave an in-game table with no humans left deletes it entirely
+      // (see server.js's removePlayerFromTable()).
+      for (let i = 0; i < scenario.humans; i++) {
+        const leftPromise = waitForEvent(sockets[i], 'tableState', (payload) => payload === null, 5000);
+        sockets[i].emit('leaveTable');
+        await leftPromise;
+      }
+    }
+  } finally {
+    sockets.forEach((socket) => { if (socket.connected) socket.disconnect(); });
+    child.kill('SIGTERM');
+  }
+});
+
+// "Do not stall between computer players" regression: one human seated with
+// five bots (the maximum a single human can be dealt alongside) must see
+// turn order cycle Human -> Computer 1 -> ... -> Computer 5 -> Human without
+// ever needing a human action to nudge a bot-to-bot handoff along -
+// maybeScheduleBotTurn()/queueRummyTurnEvent() in games/rummy/index.js must
+// re-arm themselves after every single bot turn, not just the first.
+test('several consecutive computer turns do not stall the game', async () => {
+  const port = 3216;
+  const child = startChild(port);
+  let host;
+
+  try {
+    await waitForServer(child, port);
+    host = await connectAndRegister(port, `rummy-chain-${Date.now()}@example.com`, `RummyChain${Date.now()}`);
+
+    await createRummyTable(host.socket, { rummyComputerPlayers: 5 });
+
+    const inGamePromise = waitForEvent(host.socket, 'tableState', (payload) => payload && payload.table && payload.table.status === 'in_game', 5000);
+    host.socket.emit('startGame');
+    const inGameTable = (await inGamePromise).table;
+    assert.equal(inGameTable.players.length, 6, 'one human plus five bots fill the table');
+    assert.equal(inGameTable.players.filter((player) => player.isBot).length, 5);
+
+    let sawABotsTurn = false;
+    await new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error('Turn order stalled among the computer players')), 20000);
+      host.socket.on('rummyTurnState', (payload) => {
+        if (payload.turnPhase !== 'draw') {
+          return;
+        }
+        if (payload.turnPlayerId !== host.socket.id) {
+          sawABotsTurn = true;
+          return;
+        }
+        if (sawABotsTurn) {
+          clearTimeout(timeout);
+          resolve();
+        }
+      });
+    });
+  } finally {
+    if (host && host.socket.connected) {
+      host.socket.disconnect();
+    }
     child.kill('SIGTERM');
   }
 });
