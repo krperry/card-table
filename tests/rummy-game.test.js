@@ -366,7 +366,13 @@ test('going out scores the hand and gates the next hand on pendingHandAcks, whic
     assert.equal((await meldPromise).success, true);
 
     const summaryPromise = waitForEvent(host.socket, 'rummyHandSummary', () => true, 5000);
+    const goOutDiscardPromise = waitForEvent(host.socket, 'rummyDiscardResult', () => true, 5000);
     host.socket.emit('rummyDiscardCard', { card: '8S' });
+    const goOutDiscard = await goOutDiscardPromise;
+    // Going out ends the hand right here - finishHand()'s own summary covers
+    // it, so there is no "next turn" to fold onto the discard announcement
+    // (see performDiscardCard's nextTurnPlayerName in games/rummy/index.js).
+    assert.equal(goOutDiscard.nextTurnPlayerName, null);
     const summary = await summaryPromise;
 
     assert.equal(summary.handNumber, 1);
@@ -1254,6 +1260,14 @@ test('the acting player\'s own rummyDrawResult/rummyDiscardResult carry the exac
     const p1DiscardResult = await p1DiscardResultPromise;
     assert.equal(p1DiscardResult.success, true);
     assert.equal(p1DiscardResult.card, 'KS');
+    // nextTurnPlayerName lets the client fold "It is <name>'s turn." onto its
+    // own "You discard ..." announcement instead of waiting for the separate
+    // rummyTurnState broadcast below to say it via an assertive live region -
+    // that broadcast otherwise arrives close enough behind this event to
+    // race it and win, announcing the turn change before the discard that
+    // caused it. See rummyDiscardResult/rummySuppressNextTurnAnnounceForSelf
+    // in rummy-client.js.
+    assert.equal(p1DiscardResult.nextTurnPlayerName, p2.payload.name);
     const p1OwnTurnStateAfterDiscard = await p1OwnTurnStateAfterDiscardPromise;
     assert.equal(p1OwnTurnStateAfterDiscard.message, "It is " + p2.payload.name + "'s turn.");
     assert.ok(!p1OwnTurnStateAfterDiscard.message.includes('KS'));

@@ -94,7 +94,26 @@ Object.assign(appState, {
   // NOT suppress focus restoration - rummyRebuildCardButtons() always
   // restores focus to the same card (or grid position) now, so none of these
   // actions ever drop keyboard focus out of the hand.
-  rummySuppressNextHandUpdateExtras: false
+  rummySuppressNextHandUpdateExtras: false,
+  // Set right before emitting 'rummyDiscardCard', consumed the moment the
+  // following 'rummyTurnState' broadcast arrives (see rummyDiscardResult/
+  // rummyTurnState below). A discard is the one Rummy action that hands the
+  // turn to someone else, so the very next rummyTurnState carries "It is
+  // <name>'s turn." for the player who just discarded - rummyDiscardResult
+  // already folds that same sentence onto the end of its own "You discard
+  // ..." message (in server-sent turn order) so the two are always heard as
+  // one deterministic announcement instead of racing an assertive live
+  // region against a still-pending polite one. This flag stops that same
+  // sentence from being spoken a second time when the broadcast lands.
+  rummySuppressNextTurnAnnounceForSelf: false,
+  // True only while the lay-off currently in flight is the resubmission of
+  // an ambiguous attempt with an explicit meldChoiceIndex (see
+  // rummyChooseLayoffTarget() below) - read once by rummyLayOffResult to
+  // decide whether to name the meld type ("... into a run") in the
+  // confirmation. A plain, unambiguous lay-off says only "You lay off
+  // <card>." per the accessibility requirement that the type is only worth
+  // stating when the player had to resolve which meld it was going into.
+  rummyLastLayoffWasChoice: false
 });
 
 function rummyCardRank(card) {
@@ -658,16 +677,37 @@ function rummyRebuildCardButtons(container, items, buildButton, updateButton) {
   const restoreIndex = Math.min(focusedIndex >= 0 ? focusedIndex : 0, nextButtons.length - 1);
   const target = nextButtons[restoreIndex];
   target.tabIndex = 0;
-  const restoreLabel = target.getAttribute('aria-label');
-  target.setAttribute('aria-label', ' ');
-  target.focus();
-  window.requestAnimationFrame(function () {
+  rummyFocusSilently(target);
+}
+
+// Moves focus onto `button` without letting a screen reader announce its
+// accessible name for that focus change - used whenever an action lands
+// focus on a DIFFERENT card/control than the one the player was already on
+// (see rummyRebuildCardButtons()'s "focused card is gone" branch above and
+// rummySetControlDisabled() below), so the single "You draw/discard/meld/lay
+// off ..." srSpeak() message stays the only thing heard for that action.
+// Blanking the accessible name and restoring it on the very next animation
+// frame used to be this function's whole trick, but that's unreliable:
+// Chromium can serialize the accessibility tree once per frame, and a
+// requestAnimationFrame callback runs before that serialization - so the
+// restore can win the race and the "real" name is what actually reaches the
+// screen reader, defeating the blank entirely. A short setTimeout instead
+// guarantees the blanked state gets its own frame (and so reaches the
+// accessibility tree) before the real label returns.
+function rummyFocusSilently(button) {
+  if (!button) {
+    return;
+  }
+  const restoreLabel = button.getAttribute('aria-label');
+  button.setAttribute('aria-label', ' ');
+  button.focus();
+  window.setTimeout(function () {
     if (restoreLabel === null) {
-      target.removeAttribute('aria-label');
+      button.removeAttribute('aria-label');
     } else {
-      target.setAttribute('aria-label', restoreLabel);
+      button.setAttribute('aria-label', restoreLabel);
     }
-  });
+  }, 600);
 }
 
 // --- Hand sort control -----------------------------------------------------
@@ -936,7 +976,10 @@ function rummyChooseMeldType(type) {
   }
   const pending = appState.rummyPendingMeldChoice;
   rummyCloseMeldChoice();
-  srSpeak('Melding as a ' + type + '.', 'assertive', { canInterruptLock: true });
+  // No "Melding as a ..." announcement here on purpose, same reasoning as
+  // rummyChooseLayoffTarget() above: the resubmit below gets its own
+  // rummyMeldResult confirmation ("You meld ... as a set/run.") a moment
+  // later, which already names the type - speaking both would race.
   socket.emit('rummyMeldCards', { cards: pending.cards, meldTypeChoice: type });
 }
 
@@ -1117,10 +1160,15 @@ function rummyCommitLayoff() {
     const focusedCard = rummyGetFocusedHandCard();
     const groups = appState.rummyMelds[appState.rummyLayoffTargetSeat] || [];
     if (focusedCard && rummyCardCanExtendAnyGroup(focusedCard, groups)) {
+      // No "Marked ... for lay off" announcement here on purpose - this
+      // implicit mark is immediately followed (below) by the actual lay-off
+      // request, whose own rummyLayOffResult confirmation ("You lay off
+      // ...") is the one thing the player needs to hear. Speaking both would
+      // either double up or race, since the two are only a network round
+      // trip apart.
       appState.rummySelectedCards = [focusedCard];
       cards = [focusedCard];
       renderRummyHand();
-      srSpeak('Marked ' + rummyCardName(focusedCard) + ' for lay off.', 'polite', { canInterruptLock: true });
     } else if (focusedCard) {
       srSpeak(rummyCardName(focusedCard) + ' cannot be laid off on that player’s melds.', 'assertive', { canInterruptLock: true });
       return;
@@ -1131,6 +1179,7 @@ function rummyCommitLayoff() {
   }
 
   appState.rummyLastLayoffAttempt = { targetPlayerIndex: appState.rummyLayoffTargetSeat, cards: cards.slice() };
+  appState.rummyLastLayoffWasChoice = false;
   socket.emit('rummyLayOffCards', { targetPlayerIndex: appState.rummyLayoffTargetSeat, cards: cards });
 }
 
@@ -1208,7 +1257,12 @@ function rummyChooseLayoffTarget(groupIndex) {
   }
   const pending = appState.rummyPendingLayoffChoice;
   rummyCloseLayoffChoice();
-  srSpeak('Laying off onto that meld.', 'assertive', { canInterruptLock: true });
+  // No "Laying off onto that meld" announcement here on purpose - same
+  // reasoning as rummyCommitLayoff()'s implicit-mark branch above: the
+  // resubmit below gets a rummyLayOffResult confirmation ("You lay off ...
+  // into a set/run.") a moment later, and that's the one thing the player
+  // needs to hear.
+  appState.rummyLastLayoffWasChoice = true;
   socket.emit('rummyLayOffCards', { targetPlayerIndex: pending.targetPlayerIndex, cards: pending.cards, meldChoiceIndex: groupIndex });
 }
 
@@ -1249,12 +1303,18 @@ function handleRummyLayoffChoiceKey(key) {
 // into the hand grid first whenever that's about to happen, for every Rummy
 // control button (not just the draw ones - the same failure mode applies
 // any time a focused Meld/Lay Off/Discard/Unmark button becomes disabled).
+// Uses rummyFocusSilently() (not a plain .focus()) because this reroute
+// always follows right on the heels of the action's own "You draw/discard/
+// meld/lay off ..." srSpeak() message - without it, the card that ends up
+// focused would get its name read out too, competing with that message.
 function rummySetControlDisabled(button, disabled) {
   if (!button) {
     return;
   }
   if (disabled && !button.disabled && button === document.activeElement) {
-    rummyFocusHand();
+    const container = document.getElementById('rummy-hand');
+    const target = container && (container.querySelector('button[tabindex="0"]') || container.querySelector('button'));
+    rummyFocusSilently(target);
   }
   button.disabled = disabled;
 }
@@ -1533,7 +1593,16 @@ socket.on('rummyTurnState', function (payload) {
 
   renderRummyWidgets();
 
-  if (payload.message) {
+  if (appState.rummySuppressNextTurnAnnounceForSelf) {
+    // rummyDiscardResult already folded this exact "It is <name>'s turn."
+    // sentence onto its own "You discard ..." message a moment ago (see
+    // that handler below) - speaking it again here would either repeat it
+    // or, worse, race and win over that still-pending polite announcement
+    // since this message is assertive. One-shot: only ever set right before
+    // this same broadcast is expected, so it's always the announcement it
+    // was meant to suppress.
+    appState.rummySuppressNextTurnAnnounceForSelf = false;
+  } else if (payload.message) {
     srSpeak(payload.message, 'assertive', { canInterruptLock: true, lockMs: 900 });
   }
 
@@ -1626,7 +1695,13 @@ socket.on('rummyLayOffResult', function (payload) {
   const laidOffCards = Array.isArray(payload.cards) ? payload.cards.map(rummyCardName).join(', ') : '';
   const meldTypes = Array.isArray(payload.meldTypes) ? payload.meldTypes : [];
   const uniqueMeldTypes = meldTypes.filter(function (type, index) { return meldTypes.indexOf(type) === index; });
-  const targetPhrase = uniqueMeldTypes.length === 1 ? (' on a ' + uniqueMeldTypes[0]) : (uniqueMeldTypes.length ? ' onto their melds' : '');
+  // Only name the meld type when the player actually had to resolve which
+  // meld it was going into (rummyLastLayoffWasChoice, set right before the
+  // resubmit in rummyChooseLayoffTarget() below) - an unambiguous lay-off
+  // says only "You lay off <card>.", per the requirement that less
+  // information is better as long as the player still hears what happened.
+  const targetPhrase = (appState.rummyLastLayoffWasChoice && uniqueMeldTypes.length === 1) ? (' into a ' + uniqueMeldTypes[0]) : '';
+  appState.rummyLastLayoffWasChoice = false;
   const jokerCount = (payload.returnedJokers || []).length;
   const jokerNote = jokerCount ? ' You take the Joker' + (jokerCount > 1 ? 's' : '') + ' into your hand.' : '';
   const message = laidOffCards
@@ -1652,7 +1727,18 @@ socket.on('rummyDiscardResult', function (payload) {
   // falls back to the same grid position, keeping focus in the hand instead
   // of dropping it.
   appState.rummySuppressNextHandUpdateExtras = true;
-  srSpeak('You discard ' + rummyCardName(payload.card) + '.', 'polite', { canInterruptLock: true });
+  // payload.nextTurnPlayerName (games/rummy/index.js's performDiscardCard)
+  // is folded onto this same message, spoken once, rather than left for the
+  // 'rummyTurnState' broadcast that follows a moment later to announce
+  // separately - see rummySuppressNextTurnAnnounceForSelf's definition
+  // above for why that broadcast would otherwise race this one and get
+  // heard first despite arriving second.
+  const message = 'You discard ' + rummyCardName(payload.card) + '.'
+    + (payload.nextTurnPlayerName ? (' It is ' + payload.nextTurnPlayerName + '\'s turn.') : '');
+  if (payload.nextTurnPlayerName) {
+    appState.rummySuppressNextTurnAnnounceForSelf = true;
+  }
+  srSpeak(message, 'polite', { canInterruptLock: true });
 });
 
 socket.on('rummyHandSummary', function (payload) {

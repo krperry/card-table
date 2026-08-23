@@ -852,10 +852,22 @@ module.exports = function createRummyGame(deps) {
     table.game.discardPile.push(card);
 
     const player = table.players[playerIndex];
-    io.to(actingId).emit('rummyDiscardResult', { success: true, card: card, message: '' });
+    const goingOut = hand.length === 0;
+    // Handed to the client so it can fold "It is <name>'s turn." onto the
+    // end of its own "You discard <card>." announcement in one srSpeak()
+    // call (see rummyDiscardResult in rummy-client.js) instead of waiting
+    // for the separate 'rummyTurnState' broadcast below to say it via an
+    // assertive live region - that broadcast arrives close enough behind
+    // this event that the two would otherwise race, and assertive routinely
+    // wins even though it's the later of the two, so the turn got announced
+    // before the discard it was actually the result of. Left null when the
+    // discard goes out (finishHand's own summary covers that instead - there
+    // is no "next turn" to announce).
+    const nextTurnPlayerName = goingOut ? null : table.players[(playerIndex + 1) % table.players.length].name;
+    io.to(actingId).emit('rummyDiscardResult', { success: true, card: card, message: '', nextTurnPlayerName: nextTurnPlayerName });
     sendHand(table, player, playerIndex);
 
-    if (hand.length === 0) {
+    if (goingOut) {
       finishHand(table, playerIndex);
       return;
     }
