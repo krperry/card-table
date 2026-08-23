@@ -407,6 +407,19 @@
             <button id="rummy-meld-choice-cancel-btn" type="button" tabindex="-1" class="rummy-small-btn">Cancel</button>
           </div>
 
+          <!-- Inline lay-off meld-target clarification - same accessibility/
+               focus model as #rummy-meld-choice above (see rummy-client.js's
+               rummyOpenLayoffChoice()): shown only when the selected card(s)
+               legally fit more than one of the target seat's meld groups.
+               The individual option buttons are built dynamically (their
+               count and labels depend on which melds match), so
+               #rummy-layoff-choice-options starts empty here. -->
+          <div id="rummy-layoff-choice" class="rummy-meld-choice hidden" role="group" aria-label="Choose which meld receives these cards">
+            <p id="rummy-layoff-choice-hint" class="hint">These cards fit more than one meld. Choose which one (press 1, 2, 3...), or press Escape to cancel.</p>
+            <div id="rummy-layoff-choice-options" class="rummy-layoff-choice-options"></div>
+            <button id="rummy-layoff-choice-cancel-btn" type="button" tabindex="-1" class="rummy-small-btn">Cancel</button>
+          </div>
+
           <div id="rummy-sort-control" class="rummy-section hidden">
             <h3 id="rummy-sort-heading">Sort cards by</h3>
             <button id="rummy-sort-toggle-btn" type="button" aria-describedby="rummy-sort-heading">By suit</button>
@@ -519,7 +532,7 @@
           <li>Space: mark or unmark the focused card for the next meld or lay-off</li>
           <li>Enter: discard the focused card immediately, ending your turn (only once you have drawn this turn; refused while any cards are marked - unselect them first)</li>
           <li>M: meld all marked cards as a new set or run (your turn, after drawing). If the selection could legally be either, you're asked to choose: press R for run or S for set, or Escape to cancel and keep the cards marked - your position in the hand is not disturbed while that choice is open</li>
-          <li>L: lay off the marked cards, or - if nothing is marked - the focused card, onto the meld target most recently reviewed with a 1-6 key press, provided it's a legal extension</li>
+          <li>L: lay off the marked cards, or - if nothing is marked - the focused card, onto the meld target most recently reviewed with a 1-6 key press, provided it's a legal extension. If the cards fit more than one of that seat's melds, you're asked to choose: press the number matching the option (1, 2, 3...) or Escape to cancel - your position is not disturbed while that choice is open</li>
           <li>Unmark All (button, next to the other action buttons), or U: unmark all currently marked cards</li>
           <li>1-6: announce seat N's melds and set seat N as the lay-off target for L (works any time, not just your turn - reviewing your own seat's melds is allowed too)</li>
           <li>Melds on the table are also shown as card images next to each seat's name for sighted players (click a seat's meld cards, or the Review melds button, to set that seat as the lay-off target); this is a visual aid only and doesn't change what's announced</li>

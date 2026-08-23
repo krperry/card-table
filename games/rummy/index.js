@@ -583,7 +583,42 @@ module.exports = function createRummyGame(deps) {
     queueRummyTurnEvent(table, { type: 'meld', playerIndex: playerIndex, playerName: player.name, meldType: resolution.type });
   }
 
-  function performLayOffCards(table, actingId, targetPlayerIndex, cards) {
+  // Commits a layoff that's already been fully resolved against ONE group
+  // (via rules.resolveLayoff() - see performLayOffCards() below) - shared by
+  // both the "exactly one legal meld" and "player answered the meld choice"
+  // paths, since committing looks identical either way.
+  function commitLayoffToGroup(table, actingId, playerIndex, targetGroups, groupIndex, cards, result) {
+    const hand = table.game.hands[playerIndex];
+    cards.forEach(function (card) {
+      hand.splice(hand.indexOf(card), 1);
+    });
+    result.returnedJokers.forEach(function (jokerCard) {
+      hand.push(jokerCard);
+    });
+    targetGroups[groupIndex] = result.group;
+
+    const player = table.players[playerIndex];
+    io.to(actingId).emit('rummyLayOffResult', { success: true, message: '', returnedJokers: result.returnedJokers });
+    sendHand(table, player, playerIndex);
+
+    if (hand.length === 0) {
+      finishHand(table, playerIndex);
+      return;
+    }
+
+    emitTableState(table);
+    queueRummyTurnEvent(table, { type: 'layoff', playerIndex: playerIndex, playerName: player.name, cards: cards });
+  }
+
+  // meldChoiceIndex (an index into targetGroups), when supplied, only ever
+  // matters when the player's selection was genuinely ambiguous about WHICH
+  // of the target seat's meld groups should receive it - see the "Player
+  // Must Be Able to Choose Which Meld Receives a Layoff" issue this exists
+  // for. A human client supplies it on a resubmit after answering the inline
+  // meld-choice prompt (see public/games/rummy/rummy-client.js's
+  // rummyChooseLayoffTarget()); a bot never supplies one (there's no human to
+  // ask) and instead always gets the first legal option - see below.
+  function performLayOffCards(table, actingId, targetPlayerIndex, cards, meldChoiceIndex) {
     if (!table || table.status !== 'in_game' || !table.game || table.game.phase !== 'playing') {
       io.to(actingId).emit('rummyLayOffResult', { success: false, message: 'Unable to lay off right now' });
       return;
@@ -608,6 +643,52 @@ module.exports = function createRummyGame(deps) {
     const hand = table.game.hands[playerIndex];
     if (!Array.isArray(cards) || !cards.length || !cardsAllInHand(hand, cards)) {
       io.to(actingId).emit('rummyLayOffResult', { success: false, message: 'Select cards from your own hand' });
+      return;
+    }
+
+    const options = rulesOptions(table);
+
+    // First: does the ENTIRE selected batch fit legally onto any ONE of the
+    // target seat's meld groups by itself (rules.resolveLayoff())? This is
+    // the question rules 9-17 (issue: "Player Must Be Able to Choose Which
+    // Meld Receives a Layoff") need answered before anything is committed -
+    // zero whole-group matches falls through to the older cross-group
+    // batch-splitting algorithm below (unchanged, still needed for a batch
+    // that legitimately spans more than one group), but two or more matches
+    // means there's a genuine choice to make and the player must be asked,
+    // exactly like rules.resolveMeld()'s needsChoice does for Run/Set.
+    const wholeGroupMatches = targetGroups
+      .map(function (group, groupIndex) { return { groupIndex: groupIndex, result: rules.resolveLayoff(group, cards, options) }; })
+      .filter(function (entry) { return entry.result; });
+
+    if (wholeGroupMatches.length === 1) {
+      commitLayoffToGroup(table, actingId, playerIndex, targetGroups, wholeGroupMatches[0].groupIndex, cards, wholeGroupMatches[0].result);
+      return;
+    }
+
+    if (wholeGroupMatches.length > 1) {
+      const actor = table.players[playerIndex];
+      let chosen = null;
+      if (typeof meldChoiceIndex === 'number') {
+        chosen = wholeGroupMatches.filter(function (entry) { return entry.groupIndex === meldChoiceIndex; })[0] || null;
+      }
+      if (!chosen && actor && actor.isBot) {
+        // No human to ask - a bot always takes the first legal option, same
+        // "no needsChoice prompt for a bot" reasoning as performMeldCards()'s
+        // meldTypeChoice handling above.
+        chosen = wholeGroupMatches[0];
+      }
+      if (chosen) {
+        commitLayoffToGroup(table, actingId, playerIndex, targetGroups, chosen.groupIndex, cards, chosen.result);
+        return;
+      }
+      io.to(actingId).emit('rummyLayOffResult', {
+        success: false,
+        needsChoice: true,
+        targetPlayerIndex: targetIndex,
+        groupIndices: wholeGroupMatches.map(function (entry) { return entry.groupIndex; }),
+        message: 'Choose which meld should receive these cards.'
+      });
       return;
     }
 
@@ -637,8 +718,8 @@ module.exports = function createRummyGame(deps) {
     // simulation (see rules.resolveGroupExtension()'s header on why that
     // stability matters - rule 13) - a shallow copy of the jokers map is
     // enough since neither pass below ever mutates a card string in place,
-    // only ever swaps in an entirely new resolved group.
-    const options = rulesOptions(table);
+    // only ever swaps in an entirely new resolved group. (options was
+    // already computed above for the whole-group-match check.)
     const simulatedGroups = targetGroups.map(function (group) {
       return { type: group.type, cards: group.cards.slice(), jokers: group.jokers ? Object.assign({}, group.jokers) : undefined, mode: group.mode };
     });
@@ -1065,7 +1146,7 @@ module.exports = function createRummyGame(deps) {
       if (!table || table.gameType !== 'rummy') {
         return;
       }
-      performLayOffCards(table, socket.id, payload && payload.targetPlayerIndex, payload && payload.cards);
+      performLayOffCards(table, socket.id, payload && payload.targetPlayerIndex, payload && payload.cards, payload && payload.meldChoiceIndex);
     });
 
     socket.on('rummyDiscardCard', function (payload) {

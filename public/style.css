@@ -1359,6 +1359,13 @@ canvas {
   touch-action: manipulation;
 }
 
+.rummy-layoff-choice-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  flex-basis: 100%;
+}
+
 .rummy-pile-area {
   display: flex;
   align-items: flex-end;
@@ -1489,6 +1496,24 @@ canvas {
 
 .rummy-meld-group {
   font-weight: 700;
+}
+
+/* Sighted-only Run/Set tag shown next to a meld's card images, only when the
+   meld contains a Joker (see renderRummyMeldBoard() in rummy-client.js) -
+   the physical cards alone don't reveal whether the Joker(s) make it a run
+   or a set, so this small label supplies the missing information without
+   replacing the card images with text. */
+.rummy-meld-type-tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: #123b39;
+  color: #f8fff6;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  vertical-align: middle;
 }
 
 /* Visual card representation of a meld group - a sighted-only companion to

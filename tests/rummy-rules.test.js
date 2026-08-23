@@ -627,16 +627,46 @@ test('Joker replacement: for "7S, Joker(8S), 9S" - only the exact 8S may replace
 // --- Sets --------------------------------------------------------------------
 
 test('Sets: a set containing "8, Joker(8), 8" only accepts another legal 8 for layoff - 7 and 9 are rejected', () => {
-  // Reals are 8C/8D; the Joker is assigned the next unused canonical suit
-  // (8H - see assignSetJokerSuits()'s header), leaving 8S as the one
-  // genuinely-new suit a real card can still add.
+  // Reals are 8C/8D; the Joker's identity is rank-only (no suit at all - see
+  // assignSetJokerRanks()'s header), so canExtendMeld/findJokerSwapTarget
+  // must treat it as generic, not pinned to a specific missing suit.
   const meld = rules.resolveMeld(['8C', '1J', '8D'], ACE_LOW, 'set');
   const group = { type: meld.type, cards: meld.cards, jokers: meld.jokers, mode: meld.mode };
-  assert.equal(meld.jokers['1J'], '8H');
+  assert.equal(meld.jokers['1J'], '8');
 
   assert.ok(rules.canExtendMeld(group, '8S', ACE_LOW));
+  assert.ok(rules.canExtendMeld(group, '8H', ACE_LOW));
   assert.ok(!rules.canExtendMeld(group, '7S', ACE_LOW));
   assert.ok(!rules.canExtendMeld(group, '9S', ACE_LOW));
+});
+
+test('Sets: a set Joker is generic by suit - either still-missing suit (8H or 8S) replaces it, not just one arbitrarily-picked suit', () => {
+  const meld = rules.resolveMeld(['8C', '1J', '8D'], ACE_LOW, 'set');
+  const group = { type: meld.type, cards: meld.cards, jokers: meld.jokers, mode: meld.mode };
+
+  assert.equal(rules.findJokerSwapTarget(group, '8H', ACE_LOW), '1J');
+  assert.equal(rules.findJokerSwapTarget(group, '8S', ACE_LOW), '1J');
+  assert.equal(rules.findJokerSwapTarget(group, '7S', ACE_LOW), null);
+  assert.equal(rules.findJokerSwapTarget(group, '9S', ACE_LOW), null);
+
+  const swapped = rules.applyJokerSwap(group, '8H', '1J', ACE_LOW);
+  assert.deepEqual(swapped.cards.slice().sort(), ['8C', '8D', '8H']);
+  assert.deepEqual(swapped.jokers, {});
+});
+
+test('Sets: a real card replaces a set Joker rather than being added beside it, even when the set still has room to grow', () => {
+  // Ace8, Ace8, Joker(rank Ace) has room for a 4th card (MAX_SET_SIZE), so a
+  // naive "just extend" pass would add AceH beside the Joker instead of
+  // replacing it - resolveLayoff (the single-group whole-batch resolver
+  // games/rummy/index.js's performLayOffCards() uses) must swap first.
+  const meld = rules.resolveMeld(['AC', 'AD', '1J'], ACE_LOW, 'set');
+  const group = { type: meld.type, cards: meld.cards, jokers: meld.jokers, mode: meld.mode };
+
+  const result = rules.resolveLayoff(group, ['AH'], ACE_LOW);
+  assert.ok(result);
+  assert.deepEqual(result.group.cards.slice().sort(), ['AC', 'AD', 'AH']);
+  assert.deepEqual(result.returnedJokers, ['1J']);
+  assert.deepEqual(result.group.jokers, {});
 });
 
 // --- Multiple layoffs at once (resolveGroupExtension) ------------------------

@@ -74,18 +74,23 @@ at least one real card to establish what it is - a group made entirely of
 Jokers isn't allowed, since there would be nothing to say what rank or suit
 it represents.
 
-**A Joker's identity is fixed the moment it joins a meld.** As soon as you
-meld or lay off a Joker, the game works out exactly which card it stands in
-for and holds it to that - it doesn't stay a generic wildcard. Most of the
-time this is worked out automatically from the other cards you selected: for
-example, selecting 7♠, a Joker, and 9♠ can only ever be a run with the Joker
-standing in for 8♠, so no question is asked. If your selection could
-legally be **either** a set or a run - for example, an 8♠ and two Jokers
-could become three 8s, or a run of 8♠-9♠-10♠ - you'll be asked to choose
-Run or Set. Once that's decided (automatically or by your choice), the order
-you selected the cards in can still matter: for a run, a Joker selected
-before or after your real cards tells the game which side of the run it's
-meant to extend.
+**A Joker's identity is fixed the moment it joins a meld - but a run and a
+set fix it differently.** In a **run**, a Joker's exact position matters, so
+it stands in for one specific card (rank *and* suit): selecting 7♠, a Joker,
+and 9♠ can only ever be a run with the Joker standing in for 8♠, so no
+question is asked. In a **set**, suit doesn't matter for a Joker the way
+position does in a run - a Joker in a set of 8s is simply "a wild 8," not
+pinned to any one missing suit. This is what lets *any* still-missing suit of
+that rank swap it out later (see "Swapping a Joker back" below), not just one
+arbitrarily-picked suit.
+
+If your selection could legally be **either** a set or a run - for example,
+an 8♠ and two Jokers could become three 8s, or a run of 8♠-9♠-10♠ - you'll be
+asked to choose Run or Set. Once that's decided (automatically or by your
+choice), the order you selected the cards in can still matter for a run: a
+Joker selected before or after your real cards tells the game which side of
+the run it's meant to extend. A set has no such position to resolve - order
+only ever decides Run vs. Set when both are legal.
 
 Whichever way it resolves, the Joker keeps that identity for as long as it
 stays part of that meld - only a legal change to the meld (a swap, or new
@@ -98,14 +103,19 @@ value; 15 is a common convention and keeps the game's existing pip-value
 deadwood scale (Ace 1, number cards their pip value, face cards 10) simply
 extended upward for the Joker.
 
-**Swapping a Joker back:** if you lay off a real card that exactly matches
-what a Joker on the table is currently standing in for, the swap happens
-automatically - the Joker comes off the meld and into your hand, and your
-real card takes its place. For example, a run of A♥ 2♥ Joker♥ (the Joker
-standing in for 3♥) accepts a laid-off 3♥ this way; a set of 5♥ 5♣ Joker♠
-accepts a laid-off 5♦ the same way. This works even when a set already has
-four cards, since the meld's size doesn't change - only the Joker leaves and
-the real card takes its slot.
+**Swapping a Joker back:** if you lay off a real card that matches what a
+Joker on the table is currently standing in for, the swap happens
+automatically - the Joker comes off the meld and into your hand, immediately
+usable again this same turn, and your real card takes its place *instead of*
+simply being added alongside the Joker. For a run this means the exact card
+the Joker represents: a run of A♥ 2♥ Joker (the Joker standing in for 3♥)
+accepts a laid-off 3♥ this way. For a set, since the Joker isn't pinned to
+any one suit, *any* still-missing suit of that rank works: a set of 5♥ 5♣
+Joker accepts a laid-off 5♦ **or** a laid-off 5♠ - whichever you lay off
+first replaces the Joker. This works even when a set already has room to
+grow to four cards - the real card still replaces the Joker rather than
+being added beside it, since the meld's size doesn't need to change; only
+the Joker leaves and the real card takes its slot.
 
 ## Laying Off
 
@@ -119,9 +129,11 @@ not resolve this point definitively; allowing lay-offs onto any meld keeps
 the rule simple and matches this implementation's keyboard-accessible
 design (see below).
 
-A card is always attached to whichever meld group it legally extends -
-there is no need to specify a particular group when more than one exists
-for the same player, since in practice a card can extend at most one group.
+A card is attached automatically when only one meld could legally receive
+it. If your selected card(s) legally fit **more than one** meld on the
+target player's board at once, you'll be asked which one to use - the game
+never guesses for you, since choosing one meld over another can matter
+strategically. See below for how that choice is presented.
 
 ## Taking a Turn
 

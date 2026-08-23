@@ -70,7 +70,18 @@ Object.assign(appState, {
   // needed to resubmit them with a meldTypeChoice if rummyMeldResult comes
   // back needsChoice (the server doesn't echo the attempt back). See
   // rummyCommitMeld()/rummyOpenMeldChoice().
-  rummyLastMeldAttemptCards: []
+  rummyLastMeldAttemptCards: [],
+  // Set while the server has told us a lay-off attempt legally fits more
+  // than one of the target seat's meld groups (rummyLayOffResult's
+  // needsChoice - see rules.resolveLayoff() server-side) and is waiting on
+  // which meld to use - { targetPlayerIndex, cards, groupIndices }. See
+  // rummyOpenLayoffChoice()/isRummyLayoffChoiceOpen() below.
+  rummyPendingLayoffChoice: null,
+  // The exact cards/target submitted with the lay-off attempt currently in
+  // flight - needed to resubmit them with a meldChoiceIndex if
+  // rummyLayOffResult comes back needsChoice (the server doesn't echo the
+  // attempt back). See rummyCommitLayoff()/rummyOpenLayoffChoice().
+  rummyLastLayoffAttempt: null
 });
 
 function rummyCardRank(card) {
@@ -237,56 +248,43 @@ function renderRummyPileVisual() {
 
 // --- Meld board (always-visible, public info) --------------------------------
 
-// Once a meld carries a server-resolved `jokers` assignment map (see
-// games/rummy/rules.js's resolveMeld()/resolveGroupExtension() - every meld
-// created or extended through this session's play has one; only a meld
-// injected by an older test harness without it wouldn't), a Joker's
-// represented card is exact and stable, not a guess - a blind player asking
-// "what does this Joker mean?" gets a real answer (issue requirement: a
-// blind player must be able to determine what a Joker currently represents).
-// A set's rank alone already answers that for its Joker(s) (a Joker in an
-// "Eights" set obviously represents an 8 - no further detail is gameplay-
-// relevant), so only a run's per-position breakdown needs to spell out each
-// Joker's exact card.
+// Simplified per the "Fix Remaining Joker Set, Meld Display, and Layoff
+// Selection Issues" issue: a meld with no Joker keeps the original concise
+// "Set: Eights" / "Run: Five-Six-Seven of Spades" phrasing (unchanged). A
+// meld that DOES contain a Joker no longer spells out which exact card each
+// Joker represents ("Joker representing Eight of Spades") - it announces the
+// cards in their logical display order (rummyBuildMeldDisplayCards(), the
+// same order the visual cards render in - see renderRummyMeldBoard() below),
+// naming a Joker only as "Joker", followed by the meld's type ("run"/"set").
+// That's deliberately enough to work out a run's exact Joker positions from
+// order alone (e.g. "Joker, 8 of Spades, Joker, run" implies 7-8-9 of
+// Spades) without ever stating it outright - a set's Jokers carry no
+// positional meaning at all, so "set" alone is the whole story there. This
+// is also the SAME text used for the inline layoff meld-choice list's
+// option labels (see rummyOpenLayoffChoice() below) - one source of truth
+// for how a meld is described, per the issue's "Shared Meld-Type
+// Information" requirement.
 function rummyMeldGroupLabel(group) {
   if (!group || !Array.isArray(group.cards) || !group.cards.length) {
     return '';
   }
 
-  if (group.jokers) {
-    const jokerCards = group.cards.filter(rummyIsJoker);
+  const displayCards = rummyBuildMeldDisplayCards(group);
+  const hasJoker = displayCards.some(rummyIsJoker);
+
+  if (!hasJoker) {
     if (group.type === 'set') {
-      const realCards = group.cards.filter(function (c) { return !rummyIsJoker(c); });
-      const rankName = realCards.length
-        ? RUMMY_RANK_NAMES[rummyCardRank(realCards[0])]
-        : (jokerCards.length ? RUMMY_RANK_NAMES[rummyCardRank(group.jokers[jokerCards[0]])] : 'unknown');
-      const jokerNote = jokerCards.length ? (', plus ' + jokerCards.length + ' Joker' + (jokerCards.length === 1 ? '' : 's')) : '';
-      return 'Set: ' + rankName + 's' + jokerNote;
+      return 'Set: ' + RUMMY_RANK_NAMES[rummyCardRank(displayCards[0])] + 's';
     }
-    const parts = group.cards.map(function (card) {
-      return rummyIsJoker(card) ? ('Joker representing ' + rummyCardName(group.jokers[card])) : rummyCardName(card);
-    });
-    return 'Run: ' + parts.join(', ');
+    const suit = RUMMY_SUIT_NAMES[rummyCardSuit(displayCards[0])] || '';
+    const ranks = displayCards.map(function (card) { return RUMMY_RANK_NAMES[rummyCardRank(card)]; }).join('-');
+    return 'Run: ' + ranks + ' of ' + suit;
   }
 
-  const jokerCount = group.cards.filter(rummyIsJoker).length;
-  const jokerNote = jokerCount ? (', plus ' + jokerCount + ' Joker' + (jokerCount === 1 ? '' : 's')) : '';
-  const realCards = group.cards.filter(function (card) { return !rummyIsJoker(card); });
-
-  if (group.type === 'set') {
-    if (!realCards.length) {
-      return 'Set: unknown' + jokerNote;
-    }
-    return 'Set: ' + RUMMY_RANK_NAMES[rummyCardRank(realCards[0])] + 's' + jokerNote;
-  }
-
-  if (!realCards.length) {
-    return 'Run: unknown' + jokerNote;
-  }
-  const sorted = realCards.slice().sort(function (a, b) { return rummyRankOrderValue(a) - rummyRankOrderValue(b); });
-  const suit = RUMMY_SUIT_NAMES[rummyCardSuit(sorted[0])] || '';
-  const ranks = sorted.map(function (card) { return RUMMY_RANK_NAMES[rummyCardRank(card)]; }).join('-');
-  return 'Run: ' + ranks + ' of ' + suit + jokerNote;
+  const parts = displayCards.map(function (card) {
+    return rummyIsJoker(card) ? 'Joker' : rummyCardName(card);
+  });
+  return parts.join(', ') + ', ' + group.type;
 }
 
 // --- Meld card visuals (sighted-only; derived from the same group data the
@@ -441,6 +439,22 @@ function renderRummyMeldBoard() {
         li.appendChild(label);
 
         li.appendChild(rummyBuildMeldCardsElement(group, seatIndex));
+
+        // Visual Run/Set tag - only for a meld containing a Joker (issue:
+        // "Do not clutter every normal meld unnecessarily" / "The important
+        // case is a meld containing Jokers"). A non-Joker meld's cards alone
+        // already make the type obvious to a sighted player (three of a
+        // kind vs. a same-suit sequence), so no tag is added there.
+        // aria-hidden because the accessible label above already states the
+        // type in words - this would otherwise be announced twice.
+        if (Array.isArray(group.cards) && group.cards.some(rummyIsJoker)) {
+          const typeTag = document.createElement('span');
+          typeTag.className = 'rummy-meld-type-tag';
+          typeTag.setAttribute('aria-hidden', 'true');
+          typeTag.textContent = group.type === 'set' ? 'Set' : 'Run';
+          li.appendChild(typeTag);
+        }
+
         list.appendChild(li);
       });
     }
@@ -993,6 +1007,9 @@ function rummyGetFocusedHandCard() {
 }
 
 function rummyCommitLayoff() {
+  if (isRummyLayoffChoiceOpen()) {
+    return;
+  }
   if (appState.rummyLayoffTargetSeat === null) {
     srSpeak('Review a player’s melds first - press 1 through 6', 'assertive', { canInterruptLock: true });
     return;
@@ -1017,7 +1034,113 @@ function rummyCommitLayoff() {
     }
   }
 
+  appState.rummyLastLayoffAttempt = { targetPlayerIndex: appState.rummyLayoffTargetSeat, cards: cards.slice() };
   socket.emit('rummyLayOffCards', { targetPlayerIndex: appState.rummyLayoffTargetSeat, cards: cards });
+}
+
+// --- Meld-choice for an ambiguous lay-off target (inline, non-modal) --------
+// Modeled directly on rummyOpenMeldChoice() above (itself modeled on Lumo's
+// Wild Draw Four color picker) - the server (games/rummy/index.js's
+// performLayOffCards(), backed by rules.resolveLayoff()) only ever asks this
+// when the player's selected card(s) legally fit MORE THAN ONE of the target
+// seat's existing meld groups at once (see the "Player Must Be Able to
+// Choose Which Meld Receives a Layoff" issue). Shown/hidden purely via the
+// "hidden" class, never given focus - a keyboard/screen-reader user's
+// position is completely undisturbed, same as the Run/Set chooser. The
+// player answers with a number key matching the option's position (handled
+// in handleRummyKeys() below, ahead of every other Rummy shortcut while this
+// is open), Escape to cancel, or by clicking/touching one of the dynamically
+// built meld-choice buttons (bound via bindPressNoFocus, so a mouse/touch
+// activation doesn't move focus there either).
+
+function isRummyLayoffChoiceOpen() {
+  return !!appState.rummyPendingLayoffChoice;
+}
+
+function rummyOpenLayoffChoice(targetPlayerIndex, groupIndices) {
+  const attempt = appState.rummyLastLayoffAttempt;
+  if (!attempt) {
+    return;
+  }
+  appState.rummyPendingLayoffChoice = {
+    targetPlayerIndex: targetPlayerIndex,
+    cards: attempt.cards.slice(),
+    groupIndices: groupIndices.slice()
+  };
+
+  const choiceEl = document.getElementById('rummy-layoff-choice');
+  const optionsEl = document.getElementById('rummy-layoff-choice-options');
+  if (optionsEl) {
+    optionsEl.innerHTML = '';
+    const groups = (appState.rummyMelds && appState.rummyMelds[targetPlayerIndex]) || [];
+    groupIndices.forEach(function (groupIndex) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      // tabindex="-1", same as the Run/Set chooser's buttons - never part of
+      // the Tab order (rule 15: never steal focus just because a choice
+      // appeared). The dedicated keydown handling below (number keys 1-9,
+      // matching each option's position) is the primary keyboard path;
+      // these buttons remain reachable for mouse and touch.
+      button.tabIndex = -1;
+      const group = groups[groupIndex];
+      // Prefer a description built from the actual meld (rule 13: "Prefer
+      // labels based on the actual meld" over a bare "Meld 1"/"Meld 2") -
+      // the same rummyMeldGroupLabel() used for the meld board's own
+      // accessible descriptions, per the "one source of truth" requirement.
+      button.textContent = (group && rummyMeldGroupLabel(group)) || ('Meld ' + (groupIndex + 1));
+      bindPressNoFocus(button, function () { rummyChooseLayoffTarget(groupIndex); });
+      optionsEl.appendChild(button);
+    });
+  }
+  if (choiceEl) {
+    choiceEl.classList.remove('hidden');
+  }
+  srSpeak('These cards fit more than one meld. Choose which one, or press Escape to cancel.', 'assertive', { canInterruptLock: true });
+}
+
+function rummyCloseLayoffChoice() {
+  appState.rummyPendingLayoffChoice = null;
+  const choiceEl = document.getElementById('rummy-layoff-choice');
+  if (choiceEl) {
+    choiceEl.classList.add('hidden');
+  }
+}
+
+function rummyChooseLayoffTarget(groupIndex) {
+  if (!isRummyLayoffChoiceOpen()) {
+    return;
+  }
+  const pending = appState.rummyPendingLayoffChoice;
+  rummyCloseLayoffChoice();
+  srSpeak('Laying off onto that meld.', 'assertive', { canInterruptLock: true });
+  socket.emit('rummyLayOffCards', { targetPlayerIndex: pending.targetPlayerIndex, cards: pending.cards, meldChoiceIndex: groupIndex });
+}
+
+function rummyCancelLayoffChoice() {
+  if (!isRummyLayoffChoiceOpen()) {
+    return;
+  }
+  rummyCloseLayoffChoice();
+  srSpeak('Lay-off canceled. Cards remain marked.', 'assertive', { canInterruptLock: true });
+}
+
+function handleRummyLayoffChoiceKey(key) {
+  if (!isRummyLayoffChoiceOpen()) {
+    return false;
+  }
+  if (key === 'escape') {
+    rummyCancelLayoffChoice();
+    return true;
+  }
+  const digit = parseInt(key, 10);
+  const groupIndices = appState.rummyPendingLayoffChoice.groupIndices;
+  if (!isNaN(digit) && digit >= 1 && digit <= groupIndices.length) {
+    rummyChooseLayoffTarget(groupIndices[digit - 1]);
+    return true;
+  }
+  // Any other key (e.g. Tab) is left alone, same reasoning as
+  // handleRummyMeldChoiceKey()'s "else if" branch above.
+  return false;
 }
 
 // --- Control buttons (mouse equivalents of the keyboard shortcuts) -----------
@@ -1169,6 +1292,15 @@ function handleRummyKeys(event) {
     return;
   }
 
+  // Same bypass-everything-else pattern as the Run/Set chooser above, while
+  // an ambiguous lay-off target choice is pending.
+  if (isRummyLayoffChoiceOpen()) {
+    if (handleRummyLayoffChoiceKey(key)) {
+      event.preventDefault();
+    }
+    return;
+  }
+
   if (event.key === '?') {
     openHelpOverlay();
     event.preventDefault();
@@ -1244,6 +1376,9 @@ socket.on('rummyHand', function (payload) {
   // meaningful - close it rather than leave it referencing stale cards.
   if (isRummyMeldChoiceOpen()) {
     rummyCloseMeldChoice();
+  }
+  if (isRummyLayoffChoiceOpen()) {
+    rummyCloseLayoffChoice();
   }
 
   renderRummyWidgets();
@@ -1336,6 +1471,10 @@ socket.on('rummyLayOffResult', function (payload) {
   if (!payload) {
     return;
   }
+  if (payload.needsChoice) {
+    rummyOpenLayoffChoice(payload.targetPlayerIndex, payload.groupIndices || []);
+    return;
+  }
   if (!payload.success) {
     srSpeak(payload.message || 'Lay-off rejected', 'assertive', { canInterruptLock: true });
     playErrorTone();
@@ -1426,6 +1565,10 @@ function rummyBindControls() {
   bindPressNoFocus(document.getElementById('rummy-meld-choice-run-btn'), function () { rummyChooseMeldType('run'); });
   bindPressNoFocus(document.getElementById('rummy-meld-choice-set-btn'), function () { rummyChooseMeldType('set'); });
   bindPressNoFocus(document.getElementById('rummy-meld-choice-cancel-btn'), rummyCancelMeldChoice);
+  // The individual lay-off meld-choice option buttons are built dynamically
+  // (see rummyOpenLayoffChoice()) and bound there, one per meld - only the
+  // static Cancel button is bound here.
+  bindPressNoFocus(document.getElementById('rummy-layoff-choice-cancel-btn'), rummyCancelLayoffChoice);
 }
 
 document.addEventListener('DOMContentLoaded', function () {

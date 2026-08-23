@@ -473,6 +473,19 @@ function findJokerSwapTarget(meldGroup, card, options) {
   // wildcard just because a same-rank different-suit card is also legal to
   // ADD to the set (that's canExtendMeld()'s job, a distinct operation).
   if (meldGroup.jokers) {
+    if (meldGroup.type === 'set') {
+      // A set Joker's stored identity is rank-only (see
+      // assignSetJokerRanks() below) - it never reserves a specific suit
+      // (rule: "Do Not Treat a Set Joker as a Missing Specific Suit"). Any
+      // card of the matching rank may replace it, as long as that suit isn't
+      // already occupied by one of the set's REAL cards.
+      const nonJokers = meldGroup.cards.filter(function (c) { return !isJoker(c); });
+      if (nonJokers.some(function (c) { return suitOf(c) === suitOf(card); })) {
+        return null;
+      }
+      const matchKey = jokers.filter(function (j) { return meldGroup.jokers[j] === rankOf(card); })[0];
+      return matchKey || null;
+    }
     const matchKey = jokers.filter(function (j) { return meldGroup.jokers[j] === card; })[0];
     return matchKey || null;
   }
@@ -529,14 +542,16 @@ function findJokerSwapTarget(meldGroup, card, options) {
 // A meld group built or extended through resolveMeld()/resolveGroupExtension
 // below carries two additional fields beyond the legacy { type, cards }
 // shape:
-//   jokers: { [jokerCard]: representedCard, ... } - e.g. { '1J': '8S' }.
-//     For a run, representedCard is the exact card (rank+suit) the Joker
-//     fills. For a set, it's a rank+suit too (see assignSetJokerSuits() for
-//     why a suit is worth assigning even though the issue's set examples
-//     only ever call out the rank - a fully specific "substitute card"
-//     identity is simpler to reason about uniformly, and a real card whose
-//     suit happens to match a Joker's assigned suit is, by construction, the
-//     literal card that Joker represents - see findJokerSwapTarget() above).
+//   jokers: { [jokerCard]: representedCard, ... } - e.g. { '1J': '8S' } for a
+//     run (the exact rank+suit that Joker fills - a run's Joker DOES have a
+//     specific suit, since its exact position in the sequence matters), or
+//     { '1J': '8' } for a set (rank ONLY - a set Joker never gets a fake
+//     suit; see assignSetJokerRanks() below and findJokerSwapTarget()'s
+//     meldGroup.jokers/set branch above, which is what lets ANY still-missing
+//     suit of that rank replace it, not just whichever suit a fake
+//     assignment happened to pick). A stored value's length is what tells
+//     the two apart: 2 characters (rank+suit) for a run, 1 character (rank
+//     only) for a set.
 //   mode: for a run, which Ace-position mode (ACE_LOW_ORDER_VALUE or
 //     ACE_HIGH_ORDER_VALUE - see the "Ace High or Low" section) the run
 //     resolved under. null for a set. Stored (not re-derived) so extending an
@@ -560,16 +575,18 @@ function rankForOrderValue(value) {
   return ORDER_VALUE_TO_RANK[value] || '';
 }
 
-// Assigns every Joker in `jokerCards` a specific rank+suit within a SET
-// anchored by `realCards` (already known to be same-rank, distinct-suit) -
-// each Joker gets the next unused suit in canonical order (C, D, H, S).
-// Suit assignment order is otherwise arbitrary (the issue explicitly says not
-// to invent a suit restriction beyond what set legality already requires),
-// but must be deterministic so two calls against the same inputs always agree
-// - canonical suit order is the simplest way to guarantee that. Returns null
-// if there isn't enough unused-suit room (can't happen within MAX_SET_SIZE,
-// but this stays a plain data function with no caller-specific assumptions).
-function assignSetJokerSuits(realCards, jokerCards) {
+// Assigns every Joker in `jokerCards` a RANK-ONLY identity within a SET
+// anchored by `realCards` (already known to be same-rank, distinct-suit). A
+// set Joker never gets a fake suit - it represents the set's rank
+// generically, with no specific suit attached (see the "Jokers in Sets Must
+// Be Generic by Suit" issue this exists for). This is what lets ANY
+// still-missing suit of that rank replace it later (see
+// findJokerSwapTarget()'s meldGroup.jokers/set branch above), instead of
+// only the one suit a fake assignment happened to pick. Returns null if
+// there isn't room for every Joker within MAX_SET_SIZE (can't happen given
+// the group was already validated via isValidSet(), but this stays a plain
+// data function with no caller-specific assumptions).
+function assignSetJokerRanks(realCards, jokerCards) {
   if (!Array.isArray(realCards) || !realCards.length) {
     return null;
   }
@@ -577,28 +594,13 @@ function assignSetJokerSuits(realCards, jokerCards) {
   if (!realCards.every(function (c) { return rankOf(c) === rank; })) {
     return null;
   }
-  const usedSuits = {};
-  for (let i = 0; i < realCards.length; i++) {
-    const suit = suitOf(realCards[i]);
-    if (usedSuits[suit]) {
-      return null; // duplicate suit among the real cards - not a legal set to begin with
-    }
-    usedSuits[suit] = true;
-  }
   if (realCards.length + (jokerCards ? jokerCards.length : 0) > MAX_SET_SIZE) {
     return null;
   }
   const assignments = {};
   (jokerCards || []).forEach(function (jokerCard) {
-    const suit = SUITS.filter(function (s) { return !usedSuits[s]; })[0];
-    if (suit) {
-      usedSuits[suit] = true;
-      assignments[jokerCard] = rank + suit;
-    }
+    assignments[jokerCard] = rank;
   });
-  if (Object.keys(assignments).length !== (jokerCards || []).length) {
-    return null;
-  }
   return assignments;
 }
 
@@ -772,9 +774,17 @@ function orderGroupCards(type, cards, jokers, mode) {
     return card;
   };
   if (type === 'set') {
-    return cards.slice().sort(function (a, b) {
-      return sortSuitValue(resolvedOf(a)) - sortSuitValue(resolvedOf(b));
+    // A set Joker has no suit to sort by (rank-only identity - see
+    // assignSetJokerRanks()) - real cards sort by suit as before, and every
+    // Joker simply trails after them (their relative order carries no
+    // meaning for a set, unlike a run's positional slots).
+    const reals = [];
+    const wilds = [];
+    cards.forEach(function (card) {
+      (isJoker(card) ? wilds : reals).push(card);
     });
+    reals.sort(function (a, b) { return sortSuitValue(a) - sortSuitValue(b); });
+    return reals.concat(wilds);
   }
   const effectiveMode = mode || ACE_LOW_ORDER_VALUE;
   return cards.slice().sort(function (a, b) {
@@ -822,19 +832,14 @@ function resolveMeld(selectedCardsInOrder, options, meldTypeChoice) {
   }
 
   let setResult = null;
-  if (realCards.length && selectedCardsInOrder.length <= MAX_SET_SIZE) {
-    const sameRank = realCards.every(function (c) { return rankOf(c) === rankOf(realCards[0]); });
-    if (sameRank) {
-      const assignments = assignSetJokerSuits(realCards, jokerCards);
-      if (assignments) {
-        setResult = {
-          type: 'set',
-          cards: orderGroupCards('set', selectedCardsInOrder, assignments, null),
-          jokers: assignments,
-          mode: null
-        };
-      }
-    }
+  if (isValidSet(selectedCardsInOrder)) {
+    const assignments = assignSetJokerRanks(realCards, jokerCards) || {};
+    setResult = {
+      type: 'set',
+      cards: orderGroupCards('set', selectedCardsInOrder, assignments, null),
+      jokers: assignments,
+      mode: null
+    };
   }
 
   const validTypes = [];
@@ -879,7 +884,7 @@ function resolveExistingGroupIdentity(group, options) {
     return { jokers: {}, mode: typeof group.mode !== 'undefined' ? group.mode : null };
   }
   if (group.type === 'set') {
-    const assignments = assignSetJokerSuits(realCards, jokerCards);
+    const assignments = assignSetJokerRanks(realCards, jokerCards);
     return assignments ? { jokers: assignments, mode: null } : { jokers: {}, mode: null };
   }
   const resolved = resolveRunJokerPositions(realCards, jokerCards, group.cards, options, null);
@@ -923,27 +928,33 @@ function resolveGroupExtension(group, subsetCardsInOrder, options) {
   const existingJokers = identity.jokers;
   let mergedMode = identity.mode;
 
-  const realEquivalents = group.cards.map(function (c) {
-    if (!isJoker(c)) {
-      return c;
-    }
-    return existingJokers[c] || c;
-  });
   const newReals = subsetCardsInOrder.filter(function (c) { return !isJoker(c); });
   const newJokers = subsetCardsInOrder.filter(isJoker);
-  const mergedRealEquivalents = realEquivalents.concat(newReals);
-
   let mergedJokers = Object.assign({}, existingJokers);
 
   if (group.type === 'set') {
     if (newJokers.length) {
-      const assignments = assignSetJokerSuits(mergedRealEquivalents, newJokers);
-      if (!assignments) {
+      // A set Joker's identity is rank-only (see assignSetJokerRanks()) - no
+      // suit bookkeeping needed here, just the set's one shared rank, taken
+      // from whichever real card (existing or newly added) or already-
+      // resolved Joker is available.
+      const existingReals = group.cards.filter(function (c) { return !isJoker(c); });
+      const rankSource = existingReals.length ? existingReals[0] : (newReals.length ? newReals[0] : null);
+      const existingJokerKeys = Object.keys(existingJokers);
+      const rank = rankSource ? rankOf(rankSource) : (existingJokerKeys.length ? existingJokers[existingJokerKeys[0]] : null);
+      if (!rank || group.cards.length + newJokers.length > MAX_SET_SIZE) {
         return null;
       }
-      Object.assign(mergedJokers, assignments);
+      newJokers.forEach(function (jokerCard) { mergedJokers[jokerCard] = rank; });
     }
   } else if (group.type === 'run') {
+    const realEquivalents = group.cards.map(function (c) {
+      if (!isJoker(c)) {
+        return c;
+      }
+      return existingJokers[c] || c;
+    });
+    const mergedRealEquivalents = realEquivalents.concat(newReals);
     const resolved = resolveRunJokerPositions(mergedRealEquivalents, newJokers, subsetCardsInOrder, options, mergedMode);
     if (!resolved) {
       return null;
@@ -961,6 +972,68 @@ function resolveGroupExtension(group, subsetCardsInOrder, options) {
     jokers: mergedJokers,
     mode: mergedMode
   };
+}
+
+// Attempts to lay `cardsInOrder` off onto a SINGLE existing group, ALL of it
+// at once (as opposed to findBestJokerAssignment() below, which finds the
+// largest subset that fits - this requires every card to land). Used by
+// games/rummy/index.js's performLayOffCards() to decide, for the player's
+// full selection, which of a seat's meld groups can legally receive the
+// WHOLE thing - the question "Player Must Be Able to Choose Which Meld
+// Receives a Layoff" (see that issue) needs answered before anything is
+// committed: zero such groups is a normal rejection, exactly one is applied
+// automatically, and more than one means the player must be asked which
+// meld they want (see index.js - this function itself is stateless and
+// never asks anything; it just reports whether/how a single group can
+// absorb the batch).
+//
+// Same two-pass approach games/rummy/index.js's old cross-group algorithm
+// used to run once for the whole target seat - Joker swaps first (a real
+// card that exactly/generically replaces a Joker already in this group
+// takes its place - rule 3/9's "replace before expanding"), then whatever's
+// left is matched against the group as one batch via
+// findBestJokerAssignment()/resolveGroupExtension() - except now scoped to
+// one candidate group at a time, and requiring every card in `cardsInOrder`
+// to be consumed (a partial fit means this group does NOT count as a legal
+// whole-batch target). Returns { group: <fully resolved replacement group>,
+// returnedJokers: [...] } or null.
+function resolveLayoff(group, cardsInOrder, options) {
+  if (!group || !Array.isArray(group.cards) || !Array.isArray(cardsInOrder) || !cardsInOrder.length) {
+    return null;
+  }
+
+  let currentGroup = {
+    type: group.type,
+    cards: group.cards.slice(),
+    jokers: group.jokers ? Object.assign({}, group.jokers) : undefined,
+    mode: group.mode
+  };
+  let remaining = cardsInOrder.slice();
+  const returnedJokers = [];
+
+  for (let i = remaining.length - 1; i >= 0; i--) {
+    const card = remaining[i];
+    const swapJoker = findJokerSwapTarget(currentGroup, card, options);
+    if (swapJoker) {
+      currentGroup = applyJokerSwap(currentGroup, card, swapJoker, options);
+      returnedJokers.push(swapJoker);
+      remaining.splice(i, 1);
+    }
+  }
+
+  if (remaining.length) {
+    const assignment = findBestJokerAssignment(currentGroup, remaining, options);
+    if (assignment.cards.length !== remaining.length) {
+      return null;
+    }
+    const extended = resolveGroupExtension(currentGroup, assignment.cards, options);
+    if (!extended) {
+      return null;
+    }
+    currentGroup = extended;
+  }
+
+  return { group: currentGroup, returnedJokers: returnedJokers };
 }
 
 // Given an existing meld group and a pool of "candidate" cards a player has
@@ -1121,13 +1194,14 @@ module.exports = {
   findJokerSwapTarget: findJokerSwapTarget,
   findBestJokerAssignment: findBestJokerAssignment,
   rankForOrderValue: rankForOrderValue,
-  assignSetJokerSuits: assignSetJokerSuits,
+  assignSetJokerRanks: assignSetJokerRanks,
   resolveRunJokerPositions: resolveRunJokerPositions,
   orderGroupCards: orderGroupCards,
   resolveMeld: resolveMeld,
   resolveExistingGroupIdentity: resolveExistingGroupIdentity,
   applyJokerSwap: applyJokerSwap,
   resolveGroupExtension: resolveGroupExtension,
+  resolveLayoff: resolveLayoff,
   isStockExhausted: isStockExhausted,
   reshuffleDiscardIntoStock: reshuffleDiscardIntoStock,
   scoreHand: scoreHand,
