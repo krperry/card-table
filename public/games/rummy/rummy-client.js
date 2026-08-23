@@ -86,17 +86,14 @@ Object.assign(appState, {
   // successful draw or discard (rummyDrawResult/rummyDiscardResult below),
   // read/consumed the moment that update arrives, so it never affects any
   // later, unrelated hand update (a fresh deal, a meld, a lay-off). It
-  // suppresses two things that update would otherwise do, both of which
-  // compete with the single "You draw/discard <card>." srSpeak()
-  // announcement those two actions are supposed to produce: (1) the "New
-  // hand: <full hand>" readout (see the 'rummyHand' handler below - that
-  // update fires after every hand-changing action, not just a real new
-  // deal), and (2) rummyRebuildCardButtons()'s normal "restore focus to the
-  // same grid position" step, which - if focus already happened to be
-  // inside the hand grid when the draw/discard was performed (e.g. via the
-  // D/W/E/Enter shortcuts, which don't require leaving the hand first) -
-  // would re-focus a card button and have the browser/screen reader
-  // announce that card's name too.
+  // suppresses the "New hand: <full hand>" readout (see the 'rummyHand'
+  // handler below - that update fires after every hand-changing action, not
+  // just a real new deal), which would otherwise compete with the single
+  // "You draw/discard <card>." srSpeak() announcement those two actions are
+  // supposed to produce. It does NOT suppress focus restoration -
+  // rummyRebuildCardButtons() always restores focus to the same card (or
+  // grid position) now, so drawing/discarding never drops keyboard focus out
+  // of the hand.
   rummySuppressNextHandUpdateExtras: false
 });
 
@@ -581,11 +578,11 @@ function rummyBindCardGridKeys(container, options) {
   });
 }
 
-function rummyRebuildCardButtons(container, items, buildButton, options) {
-  const skipFocus = !!(options && options.skipFocus);
-  const hadFocus = !skipFocus && container.contains(document.activeElement);
+function rummyRebuildCardButtons(container, items, buildButton) {
+  const hadFocus = container.contains(document.activeElement);
   const previousButtons = Array.prototype.slice.call(container.querySelectorAll('button'));
   const focusedIndex = hadFocus ? previousButtons.indexOf(document.activeElement) : -1;
+  const focusedCard = hadFocus && document.activeElement.dataset ? document.activeElement.dataset.card : null;
 
   container.innerHTML = '';
   items.forEach(function (item, index) {
@@ -594,7 +591,21 @@ function rummyRebuildCardButtons(container, items, buildButton, options) {
 
   const buttons = container.querySelectorAll('button');
   if (hadFocus && buttons.length) {
-    const restoreIndex = focusedIndex >= 0 ? Math.min(focusedIndex, buttons.length - 1) : 0;
+    // Prefer re-focusing the exact same card (e.g. a draw inserts a new card
+    // elsewhere in a sorted hand, shifting everything after it) so keyboard/
+    // screen-reader users never lose their place mid-hand; fall back to the
+    // same grid position (e.g. a discard removes the focused card entirely)
+    // when that exact card is no longer present. Always restoring focus here
+    // - rather than skipping it after a draw/discard, as this used to - is
+    // the fix for keyboard navigation getting dropped out of the table
+    // entirely after drawing: a screen reader briefly re-announcing the
+    // focused card is a far smaller issue than losing focus altogether.
+    let restoreIndex = focusedCard
+      ? Array.prototype.findIndex.call(buttons, function (button) { return button.dataset.card === focusedCard; })
+      : -1;
+    if (restoreIndex === -1) {
+      restoreIndex = focusedIndex >= 0 ? Math.min(focusedIndex, buttons.length - 1) : 0;
+    }
     Array.prototype.forEach.call(buttons, function (button, index) { button.tabIndex = index === restoreIndex ? 0 : -1; });
     buttons[restoreIndex].focus();
   }
@@ -689,10 +700,13 @@ function renderRummyHand() {
     }
   });
 
-  // Consumed here unconditionally (not just inside the rebuild branch below)
-  // so it can never leak into a later, unrelated rebuild - see where it's
-  // set in the rummyDrawResult/rummyDiscardResult handlers further down.
-  const skipFocus = appState.rummySuppressNextHandUpdateExtras;
+  // Consumed (and reset) here so it can never leak into a later, unrelated
+  // rebuild - see where it's set in the rummyDrawResult/rummyDiscardResult
+  // handlers further down. Only gates the "New hand: ..." full-hand
+  // announcement (read directly off this flag by the 'rummyHand' socket
+  // handler above, before renderRummyWidgets() runs) - it no longer
+  // suppresses focus restoration in rummyRebuildCardButtons(), which now
+  // re-finds the previously focused card by identity instead.
   appState.rummySuppressNextHandUpdateExtras = false;
 
   const displayHand = rummyDisplayHand();
@@ -711,7 +725,7 @@ function renderRummyHand() {
       rummyUpdateHandButton(button, card);
       bindPressNoFocus(button, function () { rummyToggleCard(card, button); });
       return button;
-    }, { skipFocus: skipFocus });
+    });
     appState.rummyHandButtonsHandKey = handKey;
   } else {
     Array.prototype.forEach.call(container.querySelectorAll('button'), function (button) {
@@ -1168,6 +1182,24 @@ function handleRummyLayoffChoiceKey(key) {
 
 // --- Control buttons (mouse equivalents of the keyboard shortcuts) -----------
 
+// Disabling a button that currently has keyboard focus drops focus out of
+// the document entirely (the browser has nowhere else to send it) - this is
+// what broke keyboard navigation after clicking a Draw button: the click
+// left focus on e.g. #rummy-draw-stock-btn, then the very next render
+// disabled it once the turn moved out of the draw phase. Route focus back
+// into the hand grid first whenever that's about to happen, for every Rummy
+// control button (not just the draw ones - the same failure mode applies
+// any time a focused Meld/Lay Off/Discard/Unmark button becomes disabled).
+function rummySetControlDisabled(button, disabled) {
+  if (!button) {
+    return;
+  }
+  if (disabled && !button.disabled && button === document.activeElement) {
+    rummyFocusHand();
+  }
+  button.disabled = disabled;
+}
+
 function renderRummyControlButtons() {
   const myTurn = isRummyMyTurn();
   const drawPhase = myTurn && appState.rummyTurnPhase === 'draw';
@@ -1182,10 +1214,10 @@ function renderRummyControlButtons() {
   const unmarkBtn = document.getElementById('rummy-unmark-btn');
 
   if (drawStockBtn) {
-    drawStockBtn.disabled = !drawPhase;
+    rummySetControlDisabled(drawStockBtn, !drawPhase);
   }
   if (drawDiscardBtn) {
-    drawDiscardBtn.disabled = !drawPhase || !appState.rummyDiscardTop;
+    rummySetControlDisabled(drawDiscardBtn, !drawPhase || !appState.rummyDiscardTop);
   }
   if (drawPileBtn) {
     // The "Allow Drawing Entire Discard Pile" table option, off by default -
@@ -1195,19 +1227,19 @@ function renderRummyControlButtons() {
     // split as every other option-gated Rummy control.
     const allowDrawEntirePile = !!(appState.currentTable && appState.currentTable.matchSettings && appState.currentTable.matchSettings.allowDrawEntirePile);
     drawPileBtn.classList.toggle('hidden', !allowDrawEntirePile);
-    drawPileBtn.disabled = !drawPhase || !appState.rummyDiscardTop;
+    rummySetControlDisabled(drawPileBtn, !drawPhase || !appState.rummyDiscardTop);
   }
   if (meldBtn) {
-    meldBtn.disabled = !actionPhase || appState.rummySelectedCards.length < 3;
+    rummySetControlDisabled(meldBtn, !actionPhase || appState.rummySelectedCards.length < 3);
   }
   if (layoffBtn) {
-    layoffBtn.disabled = !actionPhase || !appState.rummySelectedCards.length || appState.rummyLayoffTargetSeat === null;
+    rummySetControlDisabled(layoffBtn, !actionPhase || !appState.rummySelectedCards.length || appState.rummyLayoffTargetSeat === null);
   }
   if (discardBtn) {
-    discardBtn.disabled = !actionPhase || appState.rummySelectedCards.length !== 1;
+    rummySetControlDisabled(discardBtn, !actionPhase || appState.rummySelectedCards.length !== 1);
   }
   if (unmarkBtn) {
-    unmarkBtn.disabled = !appState.rummySelectedCards.length;
+    rummySetControlDisabled(unmarkBtn, !appState.rummySelectedCards.length);
   }
 }
 
@@ -1477,15 +1509,11 @@ socket.on('rummyDrawResult', function (payload) {
     playErrorTone();
     return;
   }
-  // Skip the very next hand-grid rebuild's "restore focus to the same
-  // position" step (see rummyRebuildCardButtons()/renderRummyHand()) - if
-  // focus already happened to be on a hand card (e.g. the draw was triggered
-  // via the D/W/E keyboard shortcuts while browsing the hand), letting that
-  // rebuild refocus a card would make the browser/screen reader announce
-  // that card's name immediately after the "You draw ..." announcement
-  // below, muddying exactly which card was drawn. No focus is moved here to
-  // compensate - the player can review their hand normally afterward (F
-  // shortcut or arrow keys once focus is back in the grid).
+  // Suppresses the upcoming 'rummyHand' update's "New hand: ..." full-hand
+  // readout only (see rummySuppressNextHandUpdateExtras' definition above) -
+  // the hand-grid rebuild it triggers still restores keyboard focus to the
+  // same card the player was on (or the same grid position), so drawing via
+  // the D/W/E shortcuts never knocks focus out of the hand.
   appState.rummySuppressNextHandUpdateExtras = true;
   if (payload.source === 'pile') {
     const count = Array.isArray(payload.cards) ? payload.cards.length : 0;
@@ -1540,12 +1568,13 @@ socket.on('rummyDiscardResult', function (payload) {
     playErrorTone();
     return;
   }
-  // Same reasoning as rummyDrawResult above: focus is on the just-discarded
-  // card's button (Enter/rummyAttemptDiscardFocused discards whatever card
-  // is currently focused), and the upcoming rummyHand update rebuilds the
-  // grid without that card - skip its "restore focus to the same position"
-  // step so the browser/screen reader doesn't announce whichever card now
-  // lands in that slot on top of the "You discard ..." announcement below.
+  // Suppresses the upcoming 'rummyHand' update's "New hand: ..." full-hand
+  // readout only (see rummySuppressNextHandUpdateExtras' definition above).
+  // Focus was on the just-discarded card's button (Enter/
+  // rummyAttemptDiscardFocused discards whatever card is currently focused);
+  // that card is gone from the rebuilt grid, so rummyRebuildCardButtons()
+  // falls back to the same grid position, keeping focus in the hand instead
+  // of dropping it.
   appState.rummySuppressNextHandUpdateExtras = true;
   srSpeak('You discard ' + rummyCardName(payload.card) + '.', 'polite', { canInterruptLock: true });
 });
