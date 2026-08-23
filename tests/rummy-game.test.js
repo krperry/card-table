@@ -1175,3 +1175,104 @@ test('choosing the other meldChoiceIndex for the same ambiguous layoff sends the
     child.kill('SIGTERM');
   }
 });
+
+// Regression coverage for the "You draw/discard <card>." screen-reader fix:
+// public/games/rummy/rummy-client.js builds that one sentence entirely from
+// rummyDrawResult/rummyDiscardResult's own `card` field, and no longer moves
+// focus into the hand grid afterward (see rummySkipNextHandRefocus there) -
+// so the fix regresses if either (a) the acting player's own result payload
+// stops carrying the exact card, or (b) their own correlated rummyTurnState
+// message starts also naming that card, which would hand the client a second
+// source to (re)announce from. This test can't drive a real screen reader,
+// but it locks down the server-side data contract the client's single
+// announcement depends on, for both draw sources ('w'/'d' shortcuts) and
+// discard, all using the King of Spades from the issue's own examples.
+test('the acting player\'s own rummyDrawResult/rummyDiscardResult carry the exact card (King of Spades) with no duplicate mention in their own rummyTurnState message', async () => {
+  const port = 3214;
+  const child = startChild(port);
+  const sockets = [];
+
+  try {
+    await waitForServer(child, port);
+    const p1 = await connectAndRegister(port, `rummy-single-announce-p1-${Date.now()}@example.com`, `RmyAnnP1${Date.now()}`);
+    const p2 = await connectAndRegister(port, `rummy-single-announce-p2-${Date.now()}@example.com`, `RmyAnnP2${Date.now()}`);
+    sockets.push(p1.socket, p2.socket);
+
+    const table = await createRummyTable(p1.socket);
+    const joined = waitForEvent(p2.socket, 'tableState', (payload) => payload && payload.table && payload.table.id === table.id, 5000);
+    p2.socket.emit('joinTable', { tableId: table.id });
+    await joined;
+
+    const inGamePromise = waitForEvent(p1.socket, 'tableState', (payload) => payload && payload.table && payload.table.status === 'in_game', 5000);
+    p1.socket.emit('startGame');
+    const inGameTable = (await inGamePromise).table;
+
+    const p1Index = inGameTable.players.findIndex((player) => player.id === p1.socket.id);
+    const p2Index = 1 - p1Index;
+
+    const hands = [[], []];
+    hands[p1Index] = ['2H', '2D'];
+    hands[p2Index] = ['3C', '4C'];
+
+    const p1ReadyPromise = waitForEvent(p1.socket, 'rummyTurnState', (payload) => payload.turnPhase === 'draw' && payload.turnPlayerId === p1.socket.id, 5000);
+    p1.socket.emit('__testSetTableState', {
+      tableId: table.id,
+      game: {
+        phase: 'playing',
+        turnIndex: p1Index,
+        turnPhase: 'draw',
+        dealerIndex: p2Index,
+        hands: hands,
+        stock: ['KS'],
+        discardPile: ['9S'],
+        melds: [[], []]
+      },
+      emitRummyTurnState: true
+    });
+    await p1ReadyPromise;
+
+    // Draw from the stock (the "d" shortcut) - the result payload alone must
+    // carry the King of Spades; the acting player's own follow-up turnState
+    // must not repeat it (there's nothing left to say once turnPhase is
+    // 'action' and it was their own draw - see buildTurnMessage()).
+    const p1OwnTurnStateAfterDrawPromise = waitForEvent(p1.socket, 'rummyTurnState', (payload) => payload.turnPhase === 'action', 5000);
+    const p1DrawResultPromise = waitForEvent(p1.socket, 'rummyDrawResult', () => true, 5000);
+    p1.socket.emit('rummyDrawStock');
+    const p1DrawResult = await p1DrawResultPromise;
+    assert.equal(p1DrawResult.success, true);
+    assert.equal(p1DrawResult.card, 'KS');
+    assert.equal(p1DrawResult.source, 'stock');
+    const p1OwnTurnStateAfterDraw = await p1OwnTurnStateAfterDrawPromise;
+    assert.equal(p1OwnTurnStateAfterDraw.message, null);
+
+    // Discard that same King of Spades (the "Enter" discard) - again, the
+    // result payload alone carries it, and the acting player's own next
+    // turnState (now announcing whose turn is next) must not name it either.
+    const p1OwnTurnStateAfterDiscardPromise = waitForEvent(p1.socket, 'rummyTurnState', (payload) => payload.turnPhase === 'draw', 5000);
+    const p1DiscardResultPromise = waitForEvent(p1.socket, 'rummyDiscardResult', () => true, 5000);
+    p1.socket.emit('rummyDiscardCard', { card: 'KS' });
+    const p1DiscardResult = await p1DiscardResultPromise;
+    assert.equal(p1DiscardResult.success, true);
+    assert.equal(p1DiscardResult.card, 'KS');
+    const p1OwnTurnStateAfterDiscard = await p1OwnTurnStateAfterDiscardPromise;
+    assert.equal(p1OwnTurnStateAfterDiscard.message, "It is " + p2.payload.name + "'s turn.");
+    assert.ok(!p1OwnTurnStateAfterDiscard.message.includes('KS'));
+    assert.ok(!/King of Spades/i.test(p1OwnTurnStateAfterDiscard.message));
+
+    // p2 takes that same King of Spades off the discard pile (the "w"
+    // shortcut) - same contract: the draw result alone carries it, and p2's
+    // own next turnState (now mid-turn, 'action') says nothing at all.
+    const p2OwnTurnStateAfterDrawPromise = waitForEvent(p2.socket, 'rummyTurnState', (payload) => payload.turnPhase === 'action', 5000);
+    const p2DrawResultPromise = waitForEvent(p2.socket, 'rummyDrawResult', () => true, 5000);
+    p2.socket.emit('rummyDrawDiscard');
+    const p2DrawResult = await p2DrawResultPromise;
+    assert.equal(p2DrawResult.success, true);
+    assert.equal(p2DrawResult.card, 'KS');
+    assert.equal(p2DrawResult.source, 'discard');
+    const p2OwnTurnStateAfterDraw = await p2OwnTurnStateAfterDrawPromise;
+    assert.equal(p2OwnTurnStateAfterDraw.message, null);
+  } finally {
+    sockets.forEach((socket) => { if (socket.connected) socket.disconnect(); });
+    child.kill('SIGTERM');
+  }
+});
