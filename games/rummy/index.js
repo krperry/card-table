@@ -591,7 +591,7 @@ module.exports = function createRummyGame(deps) {
     table.game.melds[playerIndex].push({ type: resolution.type, cards: resolution.cards, jokers: resolution.jokers, mode: resolution.mode });
 
     const player = table.players[playerIndex];
-    io.to(actingId).emit('rummyMeldResult', { success: true, message: '' });
+    io.to(actingId).emit('rummyMeldResult', { success: true, message: '', cards: cards, meldType: resolution.type });
     sendHand(table, player, playerIndex);
 
     if (hand.length === 0) {
@@ -618,7 +618,7 @@ module.exports = function createRummyGame(deps) {
     targetGroups[groupIndex] = result.group;
 
     const player = table.players[playerIndex];
-    io.to(actingId).emit('rummyLayOffResult', { success: true, message: '', returnedJokers: result.returnedJokers });
+    io.to(actingId).emit('rummyLayOffResult', { success: true, message: '', returnedJokers: result.returnedJokers, cards: cards, meldTypes: [result.group.type] });
     sendHand(table, player, playerIndex);
 
     if (hand.length === 0) {
@@ -815,7 +815,8 @@ module.exports = function createRummyGame(deps) {
     });
 
     const player = table.players[playerIndex];
-    io.to(actingId).emit('rummyLayOffResult', { success: true, message: '', returnedJokers: returnedJokers });
+    const meldTypes = touchedGroupIndexes.map(function (g) { return simulatedGroups[g].type; });
+    io.to(actingId).emit('rummyLayOffResult', { success: true, message: '', returnedJokers: returnedJokers, cards: cards, meldTypes: meldTypes });
     sendHand(table, player, playerIndex);
 
     if (hand.length === 0) {

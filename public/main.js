@@ -76,7 +76,17 @@ const appState = {
 
 let audioContext = null;
 
-let speechRenderTimer = null;
+// Two independent timers - one per aria-live region - rather than a single
+// shared one. srSpeak() used to share one timer across both #sr-status and
+// #sr-alert, so a call to one region (e.g. an assertive turn announcement)
+// would clearTimeout() and steal the pending render that belonged to the
+// OTHER region's not-yet-rendered message, silently dropping it before it
+// was ever spoken (see e.g. Rummy's "You discard <card>." getting swallowed
+// by the very next "It is <name>'s turn." that follows a heartbeat later).
+// Keeping them separate lets a polite and an assertive message that arrive
+// close together each still get announced.
+let statusSpeechTimer = null;
+let alertSpeechTimer = null;
 const touchBridgeSuppressMs = 450;
 
 const el = {
@@ -1752,22 +1762,33 @@ function srSpeak(text, priority, options) {
     appState.speechLockUntil = 0;
   }
 
-  if (speechRenderTimer) {
-    window.clearTimeout(speechRenderTimer);
-    speechRenderTimer = null;
+  const isAlert = priority === 'assertive';
+  if (isAlert) {
+    if (alertSpeechTimer) {
+      window.clearTimeout(alertSpeechTimer);
+      alertSpeechTimer = null;
+    }
+  } else if (statusSpeechTimer) {
+    window.clearTimeout(statusSpeechTimer);
+    statusSpeechTimer = null;
   }
 
-  if (statusRegion) {
-    statusRegion.textContent = '';
-  }
-  if (alertRegion) {
-    alertRegion.textContent = '';
-  }
+  region.textContent = '';
 
-  speechRenderTimer = window.setTimeout(function () {
+  const timer = window.setTimeout(function () {
     region.textContent = text;
-    speechRenderTimer = null;
+    if (isAlert) {
+      alertSpeechTimer = null;
+    } else {
+      statusSpeechTimer = null;
+    }
   }, 40);
+
+  if (isAlert) {
+    alertSpeechTimer = timer;
+  } else {
+    statusSpeechTimer = timer;
+  }
 }
 
 // Give Plus One cards live outside the color*14+value numbering used by every

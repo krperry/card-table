@@ -83,17 +83,17 @@ Object.assign(appState, {
   // attempt back). See rummyCommitLayoff()/rummyOpenLayoffChoice().
   rummyLastLayoffAttempt: null,
   // Set for exactly the one upcoming 'rummyHand' update right after a
-  // successful draw or discard (rummyDrawResult/rummyDiscardResult below),
-  // read/consumed the moment that update arrives, so it never affects any
-  // later, unrelated hand update (a fresh deal, a meld, a lay-off). It
-  // suppresses the "New hand: <full hand>" readout (see the 'rummyHand'
-  // handler below - that update fires after every hand-changing action, not
-  // just a real new deal), which would otherwise compete with the single
-  // "You draw/discard <card>." srSpeak() announcement those two actions are
-  // supposed to produce. It does NOT suppress focus restoration -
-  // rummyRebuildCardButtons() always restores focus to the same card (or
-  // grid position) now, so drawing/discarding never drops keyboard focus out
-  // of the hand.
+  // successful draw, discard, meld, or lay-off (rummyDrawResult/
+  // rummyDiscardResult/rummyMeldResult/rummyLayOffResult below), read/
+  // consumed the moment that update arrives, so it never affects any later,
+  // unrelated hand update (a fresh deal). It suppresses the "New hand: <full
+  // hand>" readout (see the 'rummyHand' handler below - that update fires
+  // after every hand-changing action, not just a real new deal), which would
+  // otherwise compete with the single "You draw/discard/meld/lay off ..."
+  // srSpeak() announcement those actions are supposed to produce. It does
+  // NOT suppress focus restoration - rummyRebuildCardButtons() always
+  // restores focus to the same card (or grid position) now, so none of these
+  // actions ever drop keyboard focus out of the hand.
   rummySuppressNextHandUpdateExtras: false
 });
 
@@ -578,37 +578,96 @@ function rummyBindCardGridKeys(container, options) {
   });
 }
 
-function rummyRebuildCardButtons(container, items, buildButton) {
+function rummyRebuildCardButtons(container, items, buildButton, updateButton) {
   const hadFocus = container.contains(document.activeElement);
+  const activeElement = document.activeElement;
   const previousButtons = Array.prototype.slice.call(container.querySelectorAll('button'));
-  const focusedIndex = hadFocus ? previousButtons.indexOf(document.activeElement) : -1;
-  const focusedCard = hadFocus && document.activeElement.dataset ? document.activeElement.dataset.card : null;
+  const focusedIndex = hadFocus ? previousButtons.indexOf(activeElement) : -1;
+  const focusedCard = hadFocus && activeElement.dataset ? activeElement.dataset.card : null;
 
-  container.innerHTML = '';
-  items.forEach(function (item, index) {
-    container.appendChild(buildButton(item, index));
+  // Reuse the existing DOM node for any card that's still in the hand
+  // (keyed by card identity - every card string in a 52-card-plus-2-Jokers
+  // deck is unique) instead of destroying and recreating every button on
+  // every rebuild. Moving/reordering a node that's already attached never
+  // blurs it, so if it's the one holding keyboard focus - e.g. the card the
+  // player was on before drawing, still there after a sort-order shuffle -
+  // it silently stays focused with no native focus event at all, and so no
+  // unwanted "you're now on <card>" screen-reader announcement competing
+  // with the "You draw/discard/meld/lay off ..." srSpeak() message the
+  // caller makes right after this runs. Only a card that's genuinely new
+  // (drawn) or gone (discarded/melded/laid off) gets a new/removed node.
+  const existingByCard = {};
+  previousButtons.forEach(function (button) {
+    existingByCard[button.dataset.card] = button;
   });
 
-  const buttons = container.querySelectorAll('button');
-  if (hadFocus && buttons.length) {
-    // Prefer re-focusing the exact same card (e.g. a draw inserts a new card
-    // elsewhere in a sorted hand, shifting everything after it) so keyboard/
-    // screen-reader users never lose their place mid-hand; fall back to the
-    // same grid position (e.g. a discard removes the focused card entirely)
-    // when that exact card is no longer present. Always restoring focus here
-    // - rather than skipping it after a draw/discard, as this used to - is
-    // the fix for keyboard navigation getting dropped out of the table
-    // entirely after drawing: a screen reader briefly re-announcing the
-    // focused card is a far smaller issue than losing focus altogether.
-    let restoreIndex = focusedCard
-      ? Array.prototype.findIndex.call(buttons, function (button) { return button.dataset.card === focusedCard; })
-      : -1;
-    if (restoreIndex === -1) {
-      restoreIndex = focusedIndex >= 0 ? Math.min(focusedIndex, buttons.length - 1) : 0;
+  const keptCards = {};
+  const nextButtons = items.map(function (item, index) {
+    const existing = existingByCard[item];
+    if (existing) {
+      keptCards[item] = true;
+      if (updateButton) {
+        updateButton(existing, item);
+      }
+      return existing;
     }
-    Array.prototype.forEach.call(buttons, function (button, index) { button.tabIndex = index === restoreIndex ? 0 : -1; });
-    buttons[restoreIndex].focus();
+    return buildButton(item, index);
+  });
+
+  previousButtons.forEach(function (button) {
+    if (!keptCards[button.dataset.card] && button.parentNode === container) {
+      container.removeChild(button);
+    }
+  });
+
+  nextButtons.forEach(function (button) {
+    container.appendChild(button);
+    button.tabIndex = -1;
+  });
+
+  if (!nextButtons.length) {
+    return;
   }
+
+  if (!hadFocus) {
+    nextButtons[0].tabIndex = 0;
+    return;
+  }
+
+  if (focusedCard && keptCards[focusedCard]) {
+    // The focused card is still in hand, on the exact same DOM node as
+    // before (see above) - it never actually lost focus, so just make it
+    // the tab stop again. No .focus() call here on purpose: calling it
+    // again on an element that's already focused is a no-op for focus
+    // itself, but risks some screen readers re-announcing it anyway.
+    nextButtons.forEach(function (button) { button.tabIndex = button.dataset.card === focusedCard ? 0 : -1; });
+    return;
+  }
+
+  // The focused card is gone (discarded, melded, or laid off) - its node was
+  // genuinely removed, so keyboard focus already left the hand grid. Fall
+  // back to the same grid position, same as before, so navigation stays put
+  // instead of dropping out of the table - but this IS a real, new focus
+  // target, and calling .focus() on it as-is would make the screen reader
+  // announce ITS card name (e.g. the card that shifted into the discarded
+  // card's old slot), stepping on the "You discard/meld/lay off ..."
+  // message this action is supposed to produce instead. Blank the
+  // accessible name for the one frame the focus event fires on, then
+  // restore it right after - later arrow-key navigation onto this same
+  // button still reads its real card name normally.
+  const restoreIndex = Math.min(focusedIndex >= 0 ? focusedIndex : 0, nextButtons.length - 1);
+  const target = nextButtons[restoreIndex];
+  target.tabIndex = 0;
+  const restoreLabel = target.getAttribute('aria-label');
+  target.setAttribute('aria-label', ' ');
+  target.focus();
+  window.requestAnimationFrame(function () {
+    if (restoreLabel === null) {
+      target.removeAttribute('aria-label');
+    } else {
+      target.setAttribute('aria-label', restoreLabel);
+    }
+  });
 }
 
 // --- Hand sort control -----------------------------------------------------
@@ -725,7 +784,7 @@ function renderRummyHand() {
       rummyUpdateHandButton(button, card);
       bindPressNoFocus(button, function () { rummyToggleCard(card, button); });
       return button;
-    });
+    }, rummyUpdateHandButton);
     appState.rummyHandButtonsHandKey = handKey;
   } else {
     Array.prototype.forEach.call(container.querySelectorAll('button'), function (button) {
@@ -1420,14 +1479,14 @@ socket.on('rummyHand', function (payload) {
   // after EVERY hand-changing action - a new deal, a draw, a discard, a
   // meld, or a lay-off - not just when a new hand is dealt, and it always
   // carries a truthy handNumber. Read the suppression flag (set by
-  // rummyDrawResult/rummyDiscardResult below, right before this event
-  // arrives) before renderRummyWidgets() resets it, so the "New hand: ..."
-  // full-hand readout further down can be skipped specifically for a draw or
-  // discard - that readout was clobbering (see srSpeak()'s debounce in
-  // main.js) the single "You draw/discard <card>." announcement those
-  // actions are supposed to produce. Meld/lay-off/an actual new deal are
-  // untouched - the flag is never set for those, so this still announces the
-  // full hand exactly as it always has.
+  // rummyDrawResult/rummyDiscardResult/rummyMeldResult/rummyLayOffResult
+  // below, right before this event arrives) before renderRummyWidgets()
+  // resets it, so the "New hand: ..." full-hand readout further down can be
+  // skipped specifically for those four actions - that readout was
+  // clobbering the single "You draw/discard/meld/lay off ..." announcement
+  // each of those actions is supposed to produce. Only a genuine fresh deal
+  // leaves the flag unset, so this still announces the full hand exactly as
+  // it always has whenever a new hand actually starts.
   const suppressNewHandAnnounce = appState.rummySuppressNextHandUpdateExtras;
 
   appState.rummyHand = payload.hand;
@@ -1536,7 +1595,16 @@ socket.on('rummyMeldResult', function (payload) {
     playErrorTone();
     return;
   }
-  srSpeak('Meld formed.', 'polite', { canInterruptLock: true });
+  // Suppresses the upcoming 'rummyHand' update's "New hand: ..." full-hand
+  // readout only, same as the draw/discard results below - a meld pulls
+  // several cards out of the hand at once, which would otherwise make this
+  // readout compete with the single "You meld ..." announcement.
+  appState.rummySuppressNextHandUpdateExtras = true;
+  const meldedCards = Array.isArray(payload.cards) ? payload.cards.map(rummyCardName).join(', ') : '';
+  const meldMessage = meldedCards && payload.meldType
+    ? ('You meld ' + meldedCards + ' as a ' + payload.meldType + '.')
+    : 'Meld formed.';
+  srSpeak(meldMessage, 'polite', { canInterruptLock: true });
 });
 
 socket.on('rummyLayOffResult', function (payload) {
@@ -1552,10 +1620,18 @@ socket.on('rummyLayOffResult', function (payload) {
     playErrorTone();
     return;
   }
+  // Suppresses the upcoming 'rummyHand' update's "New hand: ..." full-hand
+  // readout only, same reasoning as the meld result above.
+  appState.rummySuppressNextHandUpdateExtras = true;
+  const laidOffCards = Array.isArray(payload.cards) ? payload.cards.map(rummyCardName).join(', ') : '';
+  const meldTypes = Array.isArray(payload.meldTypes) ? payload.meldTypes : [];
+  const uniqueMeldTypes = meldTypes.filter(function (type, index) { return meldTypes.indexOf(type) === index; });
+  const targetPhrase = uniqueMeldTypes.length === 1 ? (' on a ' + uniqueMeldTypes[0]) : (uniqueMeldTypes.length ? ' onto their melds' : '');
   const jokerCount = (payload.returnedJokers || []).length;
-  const message = jokerCount
-    ? 'Lay-off complete. You take the Joker' + (jokerCount > 1 ? 's' : '') + ' into your hand.'
-    : 'Lay-off complete.';
+  const jokerNote = jokerCount ? ' You take the Joker' + (jokerCount > 1 ? 's' : '') + ' into your hand.' : '';
+  const message = laidOffCards
+    ? ('You lay off ' + laidOffCards + targetPhrase + '.' + jokerNote)
+    : ('Lay-off complete.' + jokerNote);
   srSpeak(message, 'polite', { canInterruptLock: true });
 });
 
