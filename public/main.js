@@ -651,6 +651,9 @@ function handleFocusCardsKey(event) {
   if (typeof isColorPickerOpen === 'function' && isColorPickerOpen()) {
     return;
   }
+  if (typeof isRummyMeldChoiceOpen === 'function' && isRummyMeldChoiceOpen()) {
+    return;
+  }
 
   focusActiveGameCards({ announceOnFocus: true });
   event.preventDefault();

@@ -462,6 +462,21 @@ function findJokerSwapTarget(meldGroup, card, options) {
   if (!jokers.length) {
     return null;
   }
+
+  // Once a meld has a stored `jokers` assignment map (see resolveMeld()/
+  // resolveGroupExtension() below - every meld created or extended through
+  // this module's newer entry points carries one), a Joker's represented
+  // card is authoritative and fixed - swap eligibility is then a simple
+  // exact-match lookup, not a re-derived "does an unused slot exist" guess.
+  // This is what makes rule 9/10 correct: a set's Joker(8) can only be
+  // swapped by the exact 8 it represents, never treated as an unrestricted
+  // wildcard just because a same-rank different-suit card is also legal to
+  // ADD to the set (that's canExtendMeld()'s job, a distinct operation).
+  if (meldGroup.jokers) {
+    const matchKey = jokers.filter(function (j) { return meldGroup.jokers[j] === card; })[0];
+    return matchKey || null;
+  }
+
   const nonJokers = meldGroup.cards.filter(function (c) { return !isJoker(c); });
   if (!nonJokers.length) {
     return null;
@@ -497,6 +512,455 @@ function findJokerSwapTarget(meldGroup, card, options) {
   }
 
   return null;
+}
+
+// --- Joker identity resolution ----------------------------------------------
+// Everything below gives every Joker in a meld a specific, stable, stored
+// identity (a real card it represents) the moment it joins that meld -
+// instead of the "recompute a plausible position from scratch every time"
+// approach the legacy functions above still use for backward compatibility.
+// See the module header for why: a Joker's role must not silently change on
+// every inspection, must respect the selection order a player marked cards
+// in when that's the only thing that disambiguates intent, and must always
+// agree across creation/display/sorting/layoff/replacement/scoring, per the
+// "Implement Deterministic Joker Melds and Layoffs" issue this section
+// exists for.
+//
+// A meld group built or extended through resolveMeld()/resolveGroupExtension
+// below carries two additional fields beyond the legacy { type, cards }
+// shape:
+//   jokers: { [jokerCard]: representedCard, ... } - e.g. { '1J': '8S' }.
+//     For a run, representedCard is the exact card (rank+suit) the Joker
+//     fills. For a set, it's a rank+suit too (see assignSetJokerSuits() for
+//     why a suit is worth assigning even though the issue's set examples
+//     only ever call out the rank - a fully specific "substitute card"
+//     identity is simpler to reason about uniformly, and a real card whose
+//     suit happens to match a Joker's assigned suit is, by construction, the
+//     literal card that Joker represents - see findJokerSwapTarget() above).
+//   mode: for a run, which Ace-position mode (ACE_LOW_ORDER_VALUE or
+//     ACE_HIGH_ORDER_VALUE - see the "Ace High or Low" section) the run
+//     resolved under. null for a set. Stored (not re-derived) so extending an
+//     existing Ace-anchored run later never risks flipping its Ace
+//     interpretation (rule 13's stability requirement).
+//
+// Both fields are additive: every legacy function above (isValidSet,
+// isValidRun, classifyMeld, canExtendMeld, and findJokerSwapTarget/
+// findBestJokerAssignment without a stored `jokers` map) still operates
+// purely off `cards` exactly as before, so a meld group built by an older
+// test or a stale in-flight table state degrades gracefully - see
+// resolveExistingGroupIdentity() below, which lazily derives `jokers`/`mode`
+// the first time such a group is touched by resolveGroupExtension().
+
+const ORDER_VALUE_TO_RANK = { 2: '2', 3: '3', 4: '4', 5: '5', 6: '6', 7: '7', 8: '8', 9: '9', 10: 'T', 11: 'J', 12: 'Q', 13: 'K' };
+
+function rankForOrderValue(value) {
+  if (value === ACE_LOW_ORDER_VALUE || value === ACE_HIGH_ORDER_VALUE) {
+    return 'A';
+  }
+  return ORDER_VALUE_TO_RANK[value] || '';
+}
+
+// Assigns every Joker in `jokerCards` a specific rank+suit within a SET
+// anchored by `realCards` (already known to be same-rank, distinct-suit) -
+// each Joker gets the next unused suit in canonical order (C, D, H, S).
+// Suit assignment order is otherwise arbitrary (the issue explicitly says not
+// to invent a suit restriction beyond what set legality already requires),
+// but must be deterministic so two calls against the same inputs always agree
+// - canonical suit order is the simplest way to guarantee that. Returns null
+// if there isn't enough unused-suit room (can't happen within MAX_SET_SIZE,
+// but this stays a plain data function with no caller-specific assumptions).
+function assignSetJokerSuits(realCards, jokerCards) {
+  if (!Array.isArray(realCards) || !realCards.length) {
+    return null;
+  }
+  const rank = rankOf(realCards[0]);
+  if (!realCards.every(function (c) { return rankOf(c) === rank; })) {
+    return null;
+  }
+  const usedSuits = {};
+  for (let i = 0; i < realCards.length; i++) {
+    const suit = suitOf(realCards[i]);
+    if (usedSuits[suit]) {
+      return null; // duplicate suit among the real cards - not a legal set to begin with
+    }
+    usedSuits[suit] = true;
+  }
+  if (realCards.length + (jokerCards ? jokerCards.length : 0) > MAX_SET_SIZE) {
+    return null;
+  }
+  const assignments = {};
+  (jokerCards || []).forEach(function (jokerCard) {
+    const suit = SUITS.filter(function (s) { return !usedSuits[s]; })[0];
+    if (suit) {
+      usedSuits[suit] = true;
+      assignments[jokerCard] = rank + suit;
+    }
+  });
+  if (Object.keys(assignments).length !== (jokerCards || []).length) {
+    return null;
+  }
+  return assignments;
+}
+
+// Splits `leftover` Jokers (ones not needed to fill an internal rank gap)
+// between the low and high ends of a run, biased by `beforeCount`/
+// `afterCount` - how many of those Jokers the player selected before the
+// first real card / after the last real card of the group, in their original
+// selection order (see resolveRunJokerPositions() below for how those counts
+// are derived). This is what makes "8S, Joker, Joker" resolve as 8-9-10
+// (both Jokers selected after the 8, so both extend high) while "Joker, 8S,
+// Joker" resolves as 7-8-9 (one before, one after) - see the issue's section
+// 1 and 3 examples. When the hint is silent or contradicts available room
+// (e.g. a real card already sits at the domain's boundary on the side a
+// Joker was "hinted" toward), room availability always wins, and any
+// still-unplaced leftover defaults to the low end first, matching this
+// module's pre-existing "extend low end first" convention (see the old
+// computeRunBoundsForMode() above) for the fully-ambiguous case (no reals to
+// be "before"/"after" of at all, e.g. laying off two bare Jokers onto an
+// already-real run).
+function splitLeftoverJokers(leftover, lowRoom, highRoom, beforeCount, afterCount) {
+  if (leftover > lowRoom + highRoom) {
+    return null;
+  }
+  let low = Math.min(beforeCount, leftover, lowRoom);
+  let remaining = leftover - low;
+  let high = Math.min(afterCount, remaining, highRoom);
+  remaining -= high;
+  if (remaining > 0) {
+    const extraLow = Math.min(remaining, lowRoom - low);
+    low += extraLow;
+    remaining -= extraLow;
+  }
+  if (remaining > 0) {
+    const extraHigh = Math.min(remaining, highRoom - high);
+    high += extraHigh;
+    remaining -= extraHigh;
+  }
+  return remaining === 0 ? { low: low, high: high } : null;
+}
+
+// Resolves every Joker in `jokerCards` to a specific card within a RUN
+// anchored by `realCards` (all real cards involved - existing anchors plus
+// any new ones, already known to share one suit). `hintOrder` is the
+// selection-order card list used only to compute the before-first-real/
+// after-last-real counts splitLeftoverJokers() above needs; it may be a
+// superset of jokerCards+realCards (e.g. the player's full original
+// selection) or just the newly added cards when extending an existing group
+// (see resolveGroupExtension() below) - only the relative order of entries
+// that are actually present in it matters.
+//
+// `forcedMode`, when given, restricts resolution to that single Ace-position
+// mode (ACE_LOW_ORDER_VALUE or ACE_HIGH_ORDER_VALUE) instead of trying every
+// mode aceRunModes(options) allows - this is how an existing run's already-
+// established Ace interpretation stays stable across a later extension
+// (rule 13), instead of potentially being re-derived under a different mode
+// just because new cards happened to also validate that way.
+//
+// Returns { mode, assignments } (assignments maps each Joker card to its
+// resolved representation) or null if no applicable mode can place every
+// Joker in jokerCards.
+function resolveRunJokerPositions(realCards, jokerCards, hintOrder, options, forcedMode) {
+  if (!Array.isArray(realCards) || !realCards.length) {
+    return null;
+  }
+  const suit = suitOf(realCards[0]);
+  if (!realCards.every(function (c) { return suitOf(c) === suit; })) {
+    return null;
+  }
+  const jokers = jokerCards || [];
+  const modesToTry = forcedMode ? [forcedMode] : aceRunModes(options);
+
+  for (let m = 0; m < modesToTry.length; m++) {
+    const mode = modesToTry[m];
+    const values = realCards.map(function (c) { return runOrderValue(c, mode); });
+    const sorted = values.slice().sort(function (a, b) { return a - b; });
+    let duplicate = false;
+    for (let i = 1; i < sorted.length; i++) {
+      if (sorted[i] === sorted[i - 1]) {
+        duplicate = true;
+        break;
+      }
+    }
+    if (duplicate) {
+      continue;
+    }
+    const min = sorted[0];
+    const max = sorted[sorted.length - 1];
+    const domain = runDomainForMode(mode);
+    if (min < domain.min || max > domain.max) {
+      continue;
+    }
+
+    const gapSlots = [];
+    for (let v = min; v <= max; v++) {
+      if (sorted.indexOf(v) === -1) {
+        gapSlots.push(v);
+      }
+    }
+    const leftover = jokers.length - gapSlots.length;
+    if (leftover < 0) {
+      continue;
+    }
+    const lowRoom = min - domain.min;
+    const highRoom = domain.max - max;
+
+    let beforeCount = 0;
+    let afterCount = 0;
+    if (Array.isArray(hintOrder) && hintOrder.length) {
+      const realIndexes = [];
+      hintOrder.forEach(function (c, i) {
+        if (!isJoker(c) && realCards.indexOf(c) !== -1) {
+          realIndexes.push(i);
+        }
+      });
+      if (realIndexes.length) {
+        const firstRealIndex = Math.min.apply(null, realIndexes);
+        const lastRealIndex = Math.max.apply(null, realIndexes);
+        jokers.forEach(function (j) {
+          const idx = hintOrder.indexOf(j);
+          if (idx === -1) {
+            return;
+          }
+          if (idx < firstRealIndex) {
+            beforeCount++;
+          } else if (idx > lastRealIndex) {
+            afterCount++;
+          }
+        });
+      }
+    }
+
+    const split = splitLeftoverJokers(leftover, lowRoom, highRoom, beforeCount, afterCount);
+    if (!split) {
+      continue;
+    }
+
+    const lowSlots = [];
+    for (let v = min - 1; v >= min - split.low; v--) {
+      lowSlots.push(v);
+    }
+    const highSlots = [];
+    for (let v = max + 1; v <= max + split.high; v++) {
+      highSlots.push(v);
+    }
+    const allSlots = gapSlots.concat(lowSlots, highSlots).sort(function (a, b) { return a - b; });
+    if (allSlots.length !== jokers.length) {
+      continue;
+    }
+
+    const assignments = {};
+    jokers.forEach(function (jokerCard, i) {
+      assignments[jokerCard] = rankForOrderValue(allSlots[i]) + suit;
+    });
+    return { mode: mode, assignments: assignments };
+  }
+
+  return null;
+}
+
+// Sorts a resolved group's full card list (real cards plus Jokers) into its
+// final logical/display order - a set orders by canonical suit (matching the
+// pre-existing rummyBuildSetDisplayCards() convention client-side), a run
+// orders by rank position under `mode`. A Joker sorts using its assigned
+// representation (`jokers[card]`), which is what makes it appear physically
+// in the slot it represents (rule 17) instead of always at the end.
+function orderGroupCards(type, cards, jokers, mode) {
+  const resolvedOf = function (card) {
+    if (isJoker(card) && jokers && jokers[card]) {
+      return jokers[card];
+    }
+    return card;
+  };
+  if (type === 'set') {
+    return cards.slice().sort(function (a, b) {
+      return sortSuitValue(resolvedOf(a)) - sortSuitValue(resolvedOf(b));
+    });
+  }
+  const effectiveMode = mode || ACE_LOW_ORDER_VALUE;
+  return cards.slice().sort(function (a, b) {
+    return runOrderValue(resolvedOf(a), effectiveMode) - runOrderValue(resolvedOf(b), effectiveMode);
+  });
+}
+
+// The single entry point for interpreting a brand-new meld attempt (rules 1-8
+// of the issue this exists for). `selectedCardsInOrder` is the player's
+// marked cards in the exact order they selected them (games/rummy/index.js's
+// performMeldCards() payload) - never pre-sorted, since selection order is
+// load-bearing evidence for where an ambiguous Joker belongs (see
+// resolveRunJokerPositions() above).
+//
+// Returns one of:
+//   { ok: false, reason }                                  - not a legal meld at all
+//   { ok: true, needsChoice: true, options: [...] }         - genuinely ambiguous; ask the player
+//   { ok: true, needsChoice: false, type, cards, jokers, mode } - resolved
+//
+// `meldTypeChoice` ('run'|'set'), when supplied, is only ever consulted when
+// the selection is ACTUALLY ambiguous (both interpretations legal) - per the
+// issue's "do not use selection order [or an unnecessary prompt] when doing
+// so would contradict an otherwise obvious valid sequence", an unambiguous
+// selection always resolves to its one legal interpretation regardless of
+// what a stale/mistaken meldTypeChoice might say.
+function resolveMeld(selectedCardsInOrder, options, meldTypeChoice) {
+  if (!Array.isArray(selectedCardsInOrder) || selectedCardsInOrder.length < MIN_RUN_SIZE) {
+    return { ok: false, reason: 'Select at least three cards to meld' };
+  }
+
+  const realCards = selectedCardsInOrder.filter(function (c) { return !isJoker(c); });
+  const jokerCards = selectedCardsInOrder.filter(isJoker);
+
+  let runResult = null;
+  if (realCards.length) {
+    const resolvedRun = resolveRunJokerPositions(realCards, jokerCards, selectedCardsInOrder, options, null);
+    if (resolvedRun) {
+      runResult = {
+        type: 'run',
+        cards: orderGroupCards('run', selectedCardsInOrder, resolvedRun.assignments, resolvedRun.mode),
+        jokers: resolvedRun.assignments,
+        mode: resolvedRun.mode
+      };
+    }
+  }
+
+  let setResult = null;
+  if (realCards.length && selectedCardsInOrder.length <= MAX_SET_SIZE) {
+    const sameRank = realCards.every(function (c) { return rankOf(c) === rankOf(realCards[0]); });
+    if (sameRank) {
+      const assignments = assignSetJokerSuits(realCards, jokerCards);
+      if (assignments) {
+        setResult = {
+          type: 'set',
+          cards: orderGroupCards('set', selectedCardsInOrder, assignments, null),
+          jokers: assignments,
+          mode: null
+        };
+      }
+    }
+  }
+
+  const validTypes = [];
+  if (runResult) {
+    validTypes.push('run');
+  }
+  if (setResult) {
+    validTypes.push('set');
+  }
+
+  if (!validTypes.length) {
+    return { ok: false, reason: 'Those cards do not form a valid set or run' };
+  }
+
+  if (validTypes.length > 1 && meldTypeChoice !== 'run' && meldTypeChoice !== 'set') {
+    return { ok: true, needsChoice: true, options: validTypes };
+  }
+
+  const chosenType = validTypes.length > 1 ? meldTypeChoice : validTypes[0];
+  const chosen = chosenType === 'run' ? runResult : setResult;
+  if (!chosen) {
+    return { ok: false, reason: 'Those cards do not form a valid ' + (chosenType === 'run' ? 'run' : 'set') };
+  }
+  return { ok: true, needsChoice: false, type: chosen.type, cards: chosen.cards, jokers: chosen.jokers, mode: chosen.mode };
+}
+
+// Derives { jokers, mode } for a group that may not have them stored yet - a
+// legacy-shaped meld group (plain { type, cards }, e.g. one hand-built by an
+// older test or games/rummy/index.js's applyTestState() test hook without a
+// jokers/mode payload). Returns the group's own stored fields unchanged when
+// present (never re-derives an already-fixed assignment - rule 13), otherwise
+// treats the group's own current `cards` order as a stand-in "selection
+// order" and resolves it fresh, exactly once, the first time the group is
+// touched by resolveGroupExtension() below.
+function resolveExistingGroupIdentity(group, options) {
+  if (group.jokers) {
+    return { jokers: group.jokers, mode: typeof group.mode !== 'undefined' ? group.mode : null };
+  }
+  const realCards = group.cards.filter(function (c) { return !isJoker(c); });
+  const jokerCards = group.cards.filter(isJoker);
+  if (!jokerCards.length) {
+    return { jokers: {}, mode: typeof group.mode !== 'undefined' ? group.mode : null };
+  }
+  if (group.type === 'set') {
+    const assignments = assignSetJokerSuits(realCards, jokerCards);
+    return assignments ? { jokers: assignments, mode: null } : { jokers: {}, mode: null };
+  }
+  const resolved = resolveRunJokerPositions(realCards, jokerCards, group.cards, options, null);
+  return resolved ? { jokers: resolved.assignments, mode: resolved.mode } : { jokers: {}, mode: null };
+}
+
+// Applies a Joker-for-real-card swap (see findJokerSwapTarget() above) and
+// returns the resulting group, fully re-resolved (jokers map updated, cards
+// re-sorted into logical order via orderGroupCards()) rather than just
+// splicing the real card onto the end of the array - see rule 10/17.
+function applyJokerSwap(group, realCard, jokerCard, options) {
+  const identity = resolveExistingGroupIdentity(group, options);
+  const mergedJokers = Object.assign({}, identity.jokers);
+  delete mergedJokers[jokerCard];
+  const newCards = group.cards.filter(function (c) { return c !== jokerCard; }).concat([realCard]);
+  return {
+    type: group.type,
+    cards: orderGroupCards(group.type, newCards, mergedJokers, identity.mode),
+    jokers: mergedJokers,
+    mode: identity.mode
+  };
+}
+
+// Resolves adding `subsetCardsInOrder` (already known, via
+// findBestJokerAssignment() below, to legally extend `group` as a batch) onto
+// an existing meld group, in the player's selection order - the lay-off
+// counterpart to resolveMeld() above (rules 9-13). Existing Jokers already
+// assigned within `group` keep their exact identity (resolveExistingGroupIdentity()
+// only derives fresh ones for cards that don't have one yet); a run's already-
+// established Ace mode is preserved (passed as `forcedMode` to
+// resolveRunJokerPositions()) rather than potentially re-derived. Returns the
+// fully resolved replacement group, or null if identity resolution genuinely
+// fails (shouldn't happen given the batch was already legality-checked via
+// isValidSet()/isValidRun(), but this stays defensive since it's a distinct
+// concern - THIS card, in THIS spot - from plain legality).
+function resolveGroupExtension(group, subsetCardsInOrder, options) {
+  if (!group || !Array.isArray(group.cards) || !Array.isArray(subsetCardsInOrder) || !subsetCardsInOrder.length) {
+    return null;
+  }
+  const identity = resolveExistingGroupIdentity(group, options);
+  const existingJokers = identity.jokers;
+  let mergedMode = identity.mode;
+
+  const realEquivalents = group.cards.map(function (c) {
+    if (!isJoker(c)) {
+      return c;
+    }
+    return existingJokers[c] || c;
+  });
+  const newReals = subsetCardsInOrder.filter(function (c) { return !isJoker(c); });
+  const newJokers = subsetCardsInOrder.filter(isJoker);
+  const mergedRealEquivalents = realEquivalents.concat(newReals);
+
+  let mergedJokers = Object.assign({}, existingJokers);
+
+  if (group.type === 'set') {
+    if (newJokers.length) {
+      const assignments = assignSetJokerSuits(mergedRealEquivalents, newJokers);
+      if (!assignments) {
+        return null;
+      }
+      Object.assign(mergedJokers, assignments);
+    }
+  } else if (group.type === 'run') {
+    const resolved = resolveRunJokerPositions(mergedRealEquivalents, newJokers, subsetCardsInOrder, options, mergedMode);
+    if (!resolved) {
+      return null;
+    }
+    Object.assign(mergedJokers, resolved.assignments);
+    mergedMode = resolved.mode;
+  } else {
+    return null;
+  }
+
+  const allCards = group.cards.concat(subsetCardsInOrder);
+  return {
+    type: group.type,
+    cards: orderGroupCards(group.type, allCards, mergedJokers, mergedMode),
+    jokers: mergedJokers,
+    mode: mergedMode
+  };
 }
 
 // Given an existing meld group and a pool of "candidate" cards a player has
@@ -656,6 +1120,14 @@ module.exports = {
   canExtendMeld: canExtendMeld,
   findJokerSwapTarget: findJokerSwapTarget,
   findBestJokerAssignment: findBestJokerAssignment,
+  rankForOrderValue: rankForOrderValue,
+  assignSetJokerSuits: assignSetJokerSuits,
+  resolveRunJokerPositions: resolveRunJokerPositions,
+  orderGroupCards: orderGroupCards,
+  resolveMeld: resolveMeld,
+  resolveExistingGroupIdentity: resolveExistingGroupIdentity,
+  applyJokerSwap: applyJokerSwap,
+  resolveGroupExtension: resolveGroupExtension,
   isStockExhausted: isStockExhausted,
   reshuffleDiscardIntoStock: reshuffleDiscardIntoStock,
   scoreHand: scoreHand,

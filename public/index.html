@@ -390,6 +390,23 @@
             <button id="rummy-unmark-btn" type="button" class="rummy-small-btn">Unmark All</button>
           </div>
 
+          <!-- Inline Run/Set clarification, modeled on #color-picker-overlay's
+               accessibility/focus approach (see public/games/lumo/lumo-client.js's
+               header comments there): shown/hidden by toggling the "hidden" class
+               only (no aria-hidden), so it stays fully reachable by mouse, touch,
+               and a screen reader's browse cursor while visible, and drops out of
+               the accessibility tree entirely while hidden. Its buttons carry
+               tabindex="-1" so Tab never lands on them unexpectedly - the primary
+               keyboard path is the dedicated keydown handling in
+               handleRummyKeys()/isRummyMeldChoiceOpen(), which never moves focus
+               off of wherever the player already was (see rummyOpenMeldChoice()). -->
+          <div id="rummy-meld-choice" class="rummy-meld-choice hidden" role="group" aria-label="Choose how to meld these cards">
+            <p id="rummy-meld-choice-hint" class="hint">This selection could be a run or a set. Press R for run, S for set, or Escape to cancel.</p>
+            <button id="rummy-meld-choice-run-btn" type="button" tabindex="-1">Meld as Run</button>
+            <button id="rummy-meld-choice-set-btn" type="button" tabindex="-1">Meld as Set</button>
+            <button id="rummy-meld-choice-cancel-btn" type="button" tabindex="-1" class="rummy-small-btn">Cancel</button>
+          </div>
+
           <div id="rummy-sort-control" class="rummy-section hidden">
             <h3 id="rummy-sort-heading">Sort cards by</h3>
             <button id="rummy-sort-toggle-btn" type="button" aria-describedby="rummy-sort-heading">By suit</button>
@@ -501,7 +518,7 @@
           <li>Home/End: jump to the first/last card</li>
           <li>Space: mark or unmark the focused card for the next meld or lay-off</li>
           <li>Enter: discard the focused card immediately, ending your turn (only once you have drawn this turn; refused while any cards are marked - unselect them first)</li>
-          <li>M: meld all marked cards as a new set or run (your turn, after drawing)</li>
+          <li>M: meld all marked cards as a new set or run (your turn, after drawing). If the selection could legally be either, you're asked to choose: press R for run or S for set, or Escape to cancel and keep the cards marked - your position in the hand is not disturbed while that choice is open</li>
           <li>L: lay off the marked cards, or - if nothing is marked - the focused card, onto the meld target most recently reviewed with a 1-6 key press, provided it's a legal extension</li>
           <li>Unmark All (button, next to the other action buttons), or U: unmark all currently marked cards</li>
           <li>1-6: announce seat N's melds and set seat N as the lay-off target for L (works any time, not just your turn - reviewing your own seat's melds is allowed too)</li>

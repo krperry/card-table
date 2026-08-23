@@ -18,11 +18,20 @@
 //   2. Melds are the one interaction the platform has never needed before:
 //      face-up groups every player can see and lay cards off onto (even
 //      their own). table.game.melds[seatIndex] is an array of
-//      { type: 'set'|'run', cards: [...] } groups. Lay-offs never ask the
-//      client to name a specific group - performLayOffCards() auto-resolves
-//      which group a marked card attaches to via rules.canExtendMeld(), the
-//      same simplification the client's "press 1-6, then L" keyboard flow
-//      relies on (see public/games/rummy/rummy-client.js).
+//      { type: 'set'|'run', cards: [...], jokers: {...}, mode } groups - see
+//      games/rummy/rules.js's "Joker identity resolution" section for what
+//      `cards` (logically ordered, not selection order), `jokers` (each
+//      Joker's exact stored representation), and `mode` (a run's fixed
+//      Ace-position interpretation) mean and why they're stored rather than
+//      re-derived on every read. Lay-offs never ask the client to name a
+//      specific group - performLayOffCards() auto-resolves which group a
+//      marked card attaches to via rules.canExtendMeld()/
+//      findBestJokerAssignment(), the same simplification the client's
+//      "press 1-6, then L" keyboard flow relies on (see
+//      public/games/rummy/rummy-client.js). A genuinely ambiguous meld
+//      attempt (rules.resolveMeld()'s needsChoice) is the one case that
+//      round-trips back to the client for a Run/Set answer before anything
+//      is committed - see performMeldCards() below.
 //
 // Turn structure: turnPhase 'draw' (must call rummyDrawStock/rummyDrawDiscard
 // before anything else) -> 'action' (any number of rummyMeldCards/
@@ -75,9 +84,10 @@ module.exports = function createRummyGame(deps) {
   }
 
   // The subset of match settings games/rummy/rules.js's Ace-High-or-Low-aware
-  // functions (isValidRun/classifyMeld/canExtendMeld/findJokerSwapTarget/
-  // findBestJokerAssignment/cardValue/scoreHand) accept as their trailing
-  // `options` argument - kept as its own tiny helper so every call site below
+  // functions (isValidRun/canExtendMeld/findJokerSwapTarget/
+  // findBestJokerAssignment/resolveMeld/resolveGroupExtension/cardValue/
+  // scoreHand) accept as their trailing `options` argument - kept as its own
+  // tiny helper so every call site below
   // (and games/rummy/bots.js, which receives the same shape via
   // runBotTurn()'s botContext) builds it identically from one source of
   // truth, table.matchSettings, rather than each guessing at the field name.
@@ -359,7 +369,12 @@ module.exports = function createRummyGame(deps) {
       if (!stillBotsTurn(table, playerIndex)) {
         return;
       }
-      performMeldCards(table, botId, decision.melds[i]);
+      // decision.meldTypes[i] (set alongside decision.melds by
+      // bots.chooseMeldsAndLayoffs()) tells performMeldCards() which
+      // interpretation this candidate was generated as, so a bot is never
+      // left stuck on a rules.resolveMeld() needsChoice response - there's
+      // no human to answer that prompt. See performMeldCards()'s header.
+      performMeldCards(table, botId, decision.melds[i], decision.meldTypes && decision.meldTypes[i]);
     }
     if (!stillBotsTurn(table, playerIndex)) {
       return;
@@ -501,7 +516,15 @@ module.exports = function createRummyGame(deps) {
     queueRummyTurnEvent(table, { type: 'draw', playerIndex: playerIndex, playerName: player.name, source: 'pile', count: takenCards.length });
   }
 
-  function performMeldCards(table, actingId, cards) {
+  // meldTypeChoice ('run'|'set'), when supplied, only ever matters when the
+  // selection is genuinely ambiguous (rules.resolveMeld() ignores it
+  // otherwise) - see that function's header. A human client supplies it on a
+  // resubmit after the player answers the inline Run/Set prompt (see
+  // public/games/rummy/rummy-client.js's rummyMeldChoice* functions); a bot
+  // supplies it straight from games/rummy/bots.js's chooseMeldsAndLayoffs()
+  // meldTypes hint, computed once per candidate at decision time, so a bot
+  // is never left stuck waiting on a prompt no one will answer.
+  function performMeldCards(table, actingId, cards, meldTypeChoice) {
     if (!table || table.status !== 'in_game' || !table.game || table.game.phase !== 'playing') {
       io.to(actingId).emit('rummyMeldResult', { success: false, message: 'Unable to meld right now' });
       return;
@@ -522,16 +545,30 @@ module.exports = function createRummyGame(deps) {
       return;
     }
 
-    const classification = rules.classifyMeld(cards, rulesOptions(table));
-    if (!classification.valid) {
-      io.to(actingId).emit('rummyMeldResult', { success: false, message: 'Those cards do not form a valid set or run' });
+    const resolution = rules.resolveMeld(cards, rulesOptions(table), meldTypeChoice);
+    if (!resolution.ok) {
+      io.to(actingId).emit('rummyMeldResult', { success: false, message: resolution.reason });
+      return;
+    }
+    if (resolution.needsChoice) {
+      // Not a rejection - the selection is a legal meld either way, but which
+      // way is genuinely ambiguous (e.g. "8S, Joker, Joker" - see
+      // rules.resolveMeld()'s header). Ask the player; the same cards get
+      // resubmitted with meldTypeChoice once they answer, still validated
+      // fresh against the current hand/rules either way.
+      io.to(actingId).emit('rummyMeldResult', {
+        success: false,
+        needsChoice: true,
+        options: resolution.options,
+        message: 'Choose how to meld these cards: a run or a set.'
+      });
       return;
     }
 
     cards.forEach(function (card) {
       hand.splice(hand.indexOf(card), 1);
     });
-    table.game.melds[playerIndex].push({ type: classification.type, cards: cards.slice() });
+    table.game.melds[playerIndex].push({ type: resolution.type, cards: resolution.cards, jokers: resolution.jokers, mode: resolution.mode });
 
     const player = table.players[playerIndex];
     io.to(actingId).emit('rummyMeldResult', { success: true, message: '' });
@@ -543,7 +580,7 @@ module.exports = function createRummyGame(deps) {
     }
 
     emitTableState(table);
-    queueRummyTurnEvent(table, { type: 'meld', playerIndex: playerIndex, playerName: player.name, meldType: classification.type });
+    queueRummyTurnEvent(table, { type: 'meld', playerIndex: playerIndex, playerName: player.name, meldType: resolution.type });
   }
 
   function performLayOffCards(table, actingId, targetPlayerIndex, cards) {
@@ -596,8 +633,15 @@ module.exports = function createRummyGame(deps) {
     //     of what's left also lets a batch spanning more than one of the
     //     target's groups (e.g. some cards for a run, others for a set)
     //     resolve correctly.
+    // Groups keep their existing jokers/mode identity going into the
+    // simulation (see rules.resolveGroupExtension()'s header on why that
+    // stability matters - rule 13) - a shallow copy of the jokers map is
+    // enough since neither pass below ever mutates a card string in place,
+    // only ever swaps in an entirely new resolved group.
     const options = rulesOptions(table);
-    const simulatedGroups = targetGroups.map(function (group) { return { type: group.type, cards: group.cards.slice() }; });
+    const simulatedGroups = targetGroups.map(function (group) {
+      return { type: group.type, cards: group.cards.slice(), jokers: group.jokers ? Object.assign({}, group.jokers) : undefined, mode: group.mode };
+    });
     const assignments = [];
     let remainingCards = cards.slice();
 
@@ -606,8 +650,7 @@ module.exports = function createRummyGame(deps) {
       for (let g = 0; g < simulatedGroups.length; g++) {
         const swapJoker = rules.findJokerSwapTarget(simulatedGroups[g], card, options);
         if (swapJoker) {
-          simulatedGroups[g].cards.splice(simulatedGroups[g].cards.indexOf(swapJoker), 1);
-          simulatedGroups[g].cards.push(card);
+          simulatedGroups[g] = rules.applyJokerSwap(simulatedGroups[g], card, swapJoker, options);
           assignments.push({ card: card, groupIndex: g, jokerToReturn: swapJoker });
           remainingCards.splice(i, 1);
           break;
@@ -628,7 +671,17 @@ module.exports = function createRummyGame(deps) {
       if (!bestAssignment) {
         break;
       }
-      simulatedGroups[bestGroupIndex].cards = simulatedGroups[bestGroupIndex].cards.concat(bestAssignment.cards);
+      // bestAssignment.cards preserves the candidate pool's (i.e. the
+      // player's original selection) relative order - see
+      // findBestJokerAssignment()'s header - which resolveGroupExtension()
+      // needs intact to correctly place any brand-new Joker in this batch
+      // (rule 12: selection order resolves placement ambiguity here exactly
+      // like it does for a fresh meld).
+      const extended = rules.resolveGroupExtension(simulatedGroups[bestGroupIndex], bestAssignment.cards, options);
+      if (!extended) {
+        break;
+      }
+      simulatedGroups[bestGroupIndex] = extended;
       bestAssignment.cards.forEach(function (card) {
         assignments.push({ card: card, groupIndex: bestGroupIndex, jokerToReturn: null });
         remainingCards.splice(remainingCards.indexOf(card), 1);
@@ -640,16 +693,24 @@ module.exports = function createRummyGame(deps) {
       return;
     }
 
+    // Every touched group's final, logically-ordered, identity-resolved
+    // shape already lives in simulatedGroups (see applyJokerSwap()/
+    // resolveGroupExtension() above) - commit those wholesale rather than
+    // re-deriving the same mutations against the real targetGroups array.
     const returnedJokers = [];
+    const touchedGroupIndexes = [];
     assignments.forEach(function (assignment) {
       hand.splice(hand.indexOf(assignment.card), 1);
-      const group = targetGroups[assignment.groupIndex];
       if (assignment.jokerToReturn) {
-        group.cards.splice(group.cards.indexOf(assignment.jokerToReturn), 1);
         hand.push(assignment.jokerToReturn);
         returnedJokers.push(assignment.jokerToReturn);
       }
-      group.cards.push(assignment.card);
+      if (touchedGroupIndexes.indexOf(assignment.groupIndex) === -1) {
+        touchedGroupIndexes.push(assignment.groupIndex);
+      }
+    });
+    touchedGroupIndexes.forEach(function (g) {
+      targetGroups[g] = simulatedGroups[g];
     });
 
     const player = table.players[playerIndex];
@@ -926,9 +987,21 @@ module.exports = function createRummyGame(deps) {
         table.game.discardPile = g.discardPile.slice();
       }
       if (Array.isArray(g.melds)) {
+        // jokers/mode are optional on an injected test meld - a test that
+        // doesn't care about Joker identity can keep constructing plain
+        // { type, cards } groups exactly as before (see
+        // rules.resolveExistingGroupIdentity(), which lazily derives them
+        // from `cards` the first time such a group is touched by a lay-off);
+        // one that DOES want to pin an exact assignment can supply them
+        // directly instead.
         table.game.melds = g.melds.map(function (seatGroups) {
           return (seatGroups || []).map(function (group) {
-            return { type: group.type, cards: group.cards.slice() };
+            return {
+              type: group.type,
+              cards: group.cards.slice(),
+              jokers: group.jokers ? Object.assign({}, group.jokers) : undefined,
+              mode: typeof group.mode !== 'undefined' ? group.mode : undefined
+            };
           });
         });
       }
@@ -984,7 +1057,7 @@ module.exports = function createRummyGame(deps) {
       if (!table || table.gameType !== 'rummy') {
         return;
       }
-      performMeldCards(table, socket.id, payload && payload.cards);
+      performMeldCards(table, socket.id, payload && payload.cards, payload && payload.meldTypeChoice);
     });
 
     socket.on('rummyLayOffCards', function (payload) {

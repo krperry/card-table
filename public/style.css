@@ -1327,6 +1327,38 @@ canvas {
   font-weight: 600;
 }
 
+.rummy-meld-choice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  background: #fff6e0;
+  border: 2px solid #d8a53d;
+  border-radius: 8px;
+}
+
+.rummy-meld-choice.hidden {
+  display: none;
+}
+
+.rummy-meld-choice #rummy-meld-choice-hint {
+  flex-basis: 100%;
+  margin: 0 0 4px;
+}
+
+.rummy-meld-choice button {
+  background: #fff;
+  color: #123b39;
+  border: 2px solid #a7bdb7;
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-weight: 700;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
 .rummy-pile-area {
   display: flex;
   align-items: flex-end;

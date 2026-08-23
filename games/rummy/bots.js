@@ -598,7 +598,18 @@ function chooseMeldsAndLayoffs(hand, allMelds, ownSeatIndex, context) {
     runNaturalLayoffs(remaining, simulatedMelds, seatOrder, layoffs, options);
   }
 
-  return { melds: melds, layoffs: layoffs };
+  // meldTypes[i] names which interpretation melds[i] was generated as - a
+  // real (Joker-free) group from extractNaturalSets()/extractNaturalRuns()
+  // can never be ambiguous (same-rank-distinct-suit and same-suit-
+  // consecutive-rank are mutually exclusive for two or more real cards of
+  // the same suit), so isValidSet() alone is enough to tell natural sets and
+  // runs apart here without threading type through those helpers. This lets
+  // games/rummy/index.js's performMeldCards() skip straight past
+  // rules.resolveMeld()'s needsChoice prompt for a bot's own melds - there is
+  // no human bot to answer it (see runBotTurn()'s call site).
+  const meldTypes = melds.map(function (cards) { return rules.isValidSet(cards) ? 'set' : 'run'; });
+
+  return { melds: melds, meldTypes: meldTypes, layoffs: layoffs };
 }
 
 // Discards the highest-deadwood-value card that isn't obviously part of a

@@ -74,6 +74,23 @@ at least one real card to establish what it is - a group made entirely of
 Jokers isn't allowed, since there would be nothing to say what rank or suit
 it represents.
 
+**A Joker's identity is fixed the moment it joins a meld.** As soon as you
+meld or lay off a Joker, the game works out exactly which card it stands in
+for and holds it to that - it doesn't stay a generic wildcard. Most of the
+time this is worked out automatically from the other cards you selected: for
+example, selecting 7♠, a Joker, and 9♠ can only ever be a run with the Joker
+standing in for 8♠, so no question is asked. If your selection could
+legally be **either** a set or a run - for example, an 8♠ and two Jokers
+could become three 8s, or a run of 8♠-9♠-10♠ - you'll be asked to choose
+Run or Set. Once that's decided (automatically or by your choice), the order
+you selected the cards in can still matter: for a run, a Joker selected
+before or after your real cards tells the game which side of the run it's
+meant to extend.
+
+Whichever way it resolves, the Joker keeps that identity for as long as it
+stays part of that meld - only a legal change to the meld (a swap, or new
+cards being added) can update it.
+
 **House rule:** a Joker left in your hand when a hand ends counts as **15
 deadwood points** - more than any real card - since it's the most valuable
 card to be caught holding. Basic Rummy sources vary on the exact penalty

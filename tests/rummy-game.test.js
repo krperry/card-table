@@ -785,3 +785,153 @@ test('selecting a Joker plus a card past the gap it fills lays off both together
     child.kill('SIGTERM');
   }
 });
+
+test('a genuinely ambiguous meld selection (8S, Joker, Joker) asks the player to choose Run or Set over the socket API, and resolving as a run stores the meld in logical order with a stable Joker assignment', async () => {
+  const port = 3209;
+  const child = startChild(port);
+  const sockets = [];
+
+  try {
+    await waitForServer(child, port);
+    const p1 = await connectAndRegister(port, `rummy-meldchoice-p1-${Date.now()}@example.com`, `RummyMeldChoiceP1${Date.now()}`);
+    const p2 = await connectAndRegister(port, `rummy-meldchoice-p2-${Date.now()}@example.com`, `RummyMeldChoiceP2${Date.now()}`);
+    sockets.push(p1.socket, p2.socket);
+
+    const table = await createRummyTable(p1.socket);
+    const joined = waitForEvent(p2.socket, 'tableState', (payload) => payload && payload.table && payload.table.id === table.id, 5000);
+    p2.socket.emit('joinTable', { tableId: table.id });
+    await joined;
+
+    const inGamePromise = waitForEvent(p1.socket, 'tableState', (payload) => payload && payload.table && payload.table.status === 'in_game', 5000);
+    p1.socket.emit('startGame');
+    const inGameTable = (await inGamePromise).table;
+
+    const p1Index = inGameTable.players.findIndex((player) => player.id === p1.socket.id);
+    const p2Index = 1 - p1Index;
+
+    const hands = [[], []];
+    hands[p1Index] = ['8S', '1J', '2J', 'KC'];
+    hands[p2Index] = ['2C', '3C', '4C'];
+
+    const readyPromise = waitForEvent(p1.socket, 'rummyTurnState', (payload) => payload.turnPhase === 'action' && payload.turnPlayerId === p1.socket.id, 5000);
+    p1.socket.emit('__testSetTableState', {
+      tableId: table.id,
+      game: {
+        phase: 'playing',
+        turnIndex: p1Index,
+        turnPhase: 'action',
+        dealerIndex: p2Index,
+        hands: hands,
+        stock: ['5D', '6D'],
+        discardPile: ['QH'],
+        melds: [[], []]
+      },
+      emitRummyTurnState: true
+    });
+    await readyPromise;
+
+    // Selecting 8S, Joker, Joker (in that order) is legally either a set or
+    // a run - the server must not guess, it must ask.
+    const needsChoicePromise = waitForEvent(p1.socket, 'rummyMeldResult', () => true, 5000);
+    p1.socket.emit('rummyMeldCards', { cards: ['8S', '1J', '2J'] });
+    const needsChoice = await needsChoicePromise;
+    assert.equal(needsChoice.success, false);
+    assert.equal(needsChoice.needsChoice, true);
+    assert.deepEqual(needsChoice.options.slice().sort(), ['run', 'set']);
+
+    // The hand is untouched while the choice is pending - nothing was
+    // removed, and p1 is still mid-turn (not a rejection, just a question).
+    const turnStateBeforeChoice = await waitForEvent(p1.socket, 'rummyTurnState', () => true, 1500).catch(() => null);
+    if (turnStateBeforeChoice) {
+      // If a turnState happened to arrive (harmless - the server doesn't
+      // emit one on a needsChoice reply, so this only fires if something
+      // else did), it must still show p1 mid-action, never advanced.
+      assert.equal(turnStateBeforeChoice.turnPlayerId, p1.socket.id);
+    }
+
+    // Resubmitting the SAME cards with meldTypeChoice: 'run' resolves it -
+    // both Jokers were selected after the 8, so they extend the high end
+    // (8S-9S-TS), matching rules.resolveMeld()'s documented behavior.
+    const meldResultPromise = waitForEvent(p1.socket, 'rummyMeldResult', () => true, 5000);
+    const turnStatePromise = waitForEvent(p1.socket, 'rummyTurnState', () => true, 5000);
+    p1.socket.emit('rummyMeldCards', { cards: ['8S', '1J', '2J'], meldTypeChoice: 'run' });
+    const meldResult = await meldResultPromise;
+    assert.equal(meldResult.success, true);
+
+    const turnState = await turnStatePromise;
+    const p1Melds = turnState.melds[p1Index];
+    assert.equal(p1Melds.length, 1);
+    assert.equal(p1Melds[0].type, 'run');
+    // Stored/displayed in logical order, not raw selection order.
+    assert.deepEqual(p1Melds[0].cards, ['8S', '1J', '2J']);
+    assert.deepEqual(p1Melds[0].jokers, { '1J': '9S', '2J': 'TS' });
+  } finally {
+    sockets.forEach((socket) => { if (socket.connected) socket.disconnect(); });
+    child.kill('SIGTERM');
+  }
+});
+
+test('an unambiguous meld with a Joker in the middle of the selection resolves automatically (no prompt) and is stored in the Joker\'s logical position, not at the end of the selection', async () => {
+  const port = 3210;
+  const child = startChild(port);
+  const sockets = [];
+
+  try {
+    await waitForServer(child, port);
+    const p1 = await connectAndRegister(port, `rummy-meldorder-p1-${Date.now()}@example.com`, `RummyMeldOrderP1${Date.now()}`);
+    const p2 = await connectAndRegister(port, `rummy-meldorder-p2-${Date.now()}@example.com`, `RummyMeldOrderP2${Date.now()}`);
+    sockets.push(p1.socket, p2.socket);
+
+    const table = await createRummyTable(p1.socket, { rummyAceHighOrLow: true });
+    const joined = waitForEvent(p2.socket, 'tableState', (payload) => payload && payload.table && payload.table.id === table.id, 5000);
+    p2.socket.emit('joinTable', { tableId: table.id });
+    await joined;
+
+    const inGamePromise = waitForEvent(p1.socket, 'tableState', (payload) => payload && payload.table && payload.table.status === 'in_game', 5000);
+    p1.socket.emit('startGame');
+    const inGameTable = (await inGamePromise).table;
+
+    const p1Index = inGameTable.players.findIndex((player) => player.id === p1.socket.id);
+    const p2Index = 1 - p1Index;
+
+    const hands = [[], []];
+    // Selected in this order - Ace, King, Joker - not the run's own logical
+    // order, to prove the stored meld is re-sorted rather than mirroring
+    // selection order once the interpretation is unambiguous.
+    hands[p1Index] = ['AS', 'KS', '1J', '4C'];
+    hands[p2Index] = ['2C', '3C', '4D'];
+
+    const readyPromise = waitForEvent(p1.socket, 'rummyTurnState', (payload) => payload.turnPhase === 'action' && payload.turnPlayerId === p1.socket.id, 5000);
+    p1.socket.emit('__testSetTableState', {
+      tableId: table.id,
+      game: {
+        phase: 'playing',
+        turnIndex: p1Index,
+        turnPhase: 'action',
+        dealerIndex: p2Index,
+        hands: hands,
+        stock: ['5D', '6D'],
+        discardPile: ['QC'],
+        melds: [[], []]
+      },
+      emitRummyTurnState: true
+    });
+    await readyPromise;
+
+    const meldResultPromise = waitForEvent(p1.socket, 'rummyMeldResult', () => true, 5000);
+    const turnStatePromise = waitForEvent(p1.socket, 'rummyTurnState', () => true, 5000);
+    p1.socket.emit('rummyMeldCards', { cards: ['AS', 'KS', '1J'] });
+    const meldResult = await meldResultPromise;
+    assert.equal(meldResult.success, true);
+    assert.ok(!meldResult.needsChoice);
+
+    const turnState = await turnStatePromise;
+    const p1Melds = turnState.melds[p1Index];
+    assert.equal(p1Melds[0].type, 'run');
+    assert.deepEqual(p1Melds[0].cards, ['1J', 'KS', 'AS']);
+    assert.equal(p1Melds[0].jokers['1J'], 'QS');
+  } finally {
+    sockets.forEach((socket) => { if (socket.connected) socket.disconnect(); });
+    child.kill('SIGTERM');
+  }
+});

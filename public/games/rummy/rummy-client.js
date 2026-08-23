@@ -59,7 +59,18 @@ Object.assign(appState, {
   rummySortMode: 'value',
   // Sighted-only display preference for the meld board's card-image size.
   // See renderRummyMeldBoard()/rummyToggleMeldSize().
-  rummyMeldsEnlarged: false
+  rummyMeldsEnlarged: false,
+  // Set while the server has told us a meld attempt is genuinely ambiguous
+  // (rummyMeldResult's needsChoice - see rules.resolveMeld() server-side) and
+  // is waiting on a Run/Set answer - { cards, options } echoing what was
+  // submitted and which interpretations are legal. See
+  // rummyOpenMeldChoice()/isRummyMeldChoiceOpen() below.
+  rummyPendingMeldChoice: null,
+  // The exact cards submitted with the meld attempt currently in flight -
+  // needed to resubmit them with a meldTypeChoice if rummyMeldResult comes
+  // back needsChoice (the server doesn't echo the attempt back). See
+  // rummyCommitMeld()/rummyOpenMeldChoice().
+  rummyLastMeldAttemptCards: []
 });
 
 function rummyCardRank(card) {
@@ -226,14 +237,38 @@ function renderRummyPileVisual() {
 
 // --- Meld board (always-visible, public info) --------------------------------
 
-// A Joker's exact position within a group is genuinely ambiguous (see
-// games/rummy/rules.js's runEffectiveBounds() header) - rather than guess,
-// the label names the real cards (which fix the group's rank/suit identity)
-// and simply notes how many Jokers ride along.
+// Once a meld carries a server-resolved `jokers` assignment map (see
+// games/rummy/rules.js's resolveMeld()/resolveGroupExtension() - every meld
+// created or extended through this session's play has one; only a meld
+// injected by an older test harness without it wouldn't), a Joker's
+// represented card is exact and stable, not a guess - a blind player asking
+// "what does this Joker mean?" gets a real answer (issue requirement: a
+// blind player must be able to determine what a Joker currently represents).
+// A set's rank alone already answers that for its Joker(s) (a Joker in an
+// "Eights" set obviously represents an 8 - no further detail is gameplay-
+// relevant), so only a run's per-position breakdown needs to spell out each
+// Joker's exact card.
 function rummyMeldGroupLabel(group) {
   if (!group || !Array.isArray(group.cards) || !group.cards.length) {
     return '';
   }
+
+  if (group.jokers) {
+    const jokerCards = group.cards.filter(rummyIsJoker);
+    if (group.type === 'set') {
+      const realCards = group.cards.filter(function (c) { return !rummyIsJoker(c); });
+      const rankName = realCards.length
+        ? RUMMY_RANK_NAMES[rummyCardRank(realCards[0])]
+        : (jokerCards.length ? RUMMY_RANK_NAMES[rummyCardRank(group.jokers[jokerCards[0]])] : 'unknown');
+      const jokerNote = jokerCards.length ? (', plus ' + jokerCards.length + ' Joker' + (jokerCards.length === 1 ? '' : 's')) : '';
+      return 'Set: ' + rankName + 's' + jokerNote;
+    }
+    const parts = group.cards.map(function (card) {
+      return rummyIsJoker(card) ? ('Joker representing ' + rummyCardName(group.jokers[card])) : rummyCardName(card);
+    });
+    return 'Run: ' + parts.join(', ');
+  }
+
   const jokerCount = group.cards.filter(rummyIsJoker).length;
   const jokerNote = jokerCount ? (', plus ' + jokerCount + ' Joker' + (jokerCount === 1 ? '' : 's')) : '';
   const realCards = group.cards.filter(function (card) { return !rummyIsJoker(card); });
@@ -317,6 +352,16 @@ function rummyBuildSetDisplayCards(cards) {
 function rummyBuildMeldDisplayCards(group) {
   if (!group || !Array.isArray(group.cards) || !group.cards.length) {
     return [];
+  }
+  // A group with a server-resolved `jokers` map already arrives in its
+  // correct logical order (see games/rummy/rules.js's orderGroupCards()) -
+  // a Joker physically occupies the slot it represents (issue rule 17)
+  // without this client needing to re-derive that placement itself. Only a
+  // legacy group without one (no test harness in this codebase currently
+  // produces that, but games/rummy/index.js's applyTestState() still allows
+  // it) falls back to the older heuristic reconstruction below.
+  if (group.jokers) {
+    return group.cards.slice();
   }
   return group.type === 'run' ? rummyBuildRunDisplayCards(group.cards) : rummyBuildSetDisplayCards(group.cards);
 }
@@ -728,7 +773,93 @@ function rummyCommitMeld() {
     srSpeak('Select at least three cards to meld', 'assertive', { canInterruptLock: true });
     return;
   }
-  socket.emit('rummyMeldCards', { cards: appState.rummySelectedCards.slice() });
+  if (isRummyMeldChoiceOpen()) {
+    return;
+  }
+  appState.rummyLastMeldAttemptCards = appState.rummySelectedCards.slice();
+  socket.emit('rummyMeldCards', { cards: appState.rummyLastMeldAttemptCards.slice() });
+}
+
+// --- Run/Set clarification (inline, non-modal) ------------------------------
+// Modeled directly on public/games/lumo/lumo-client.js's Wild Draw Four color
+// picker (isColorPickerOpen()/openColorPicker()/handleColorPickerKey()): the
+// server (games/rummy/rules.js's resolveMeld()) only ever asks this when a
+// selection is genuinely ambiguous between a run and a set (see that
+// function's header) - shown/hidden purely via the "hidden" class (see
+// #rummy-meld-choice in index.html), never given focus, so a keyboard/screen-
+// reader user's position in the hand grid is completely undisturbed, exactly
+// like the Wild color picker never moves focus off the game board. The
+// player answers with R/S/Escape (handled in handleRummyKeys() below, ahead
+// of every other Rummy shortcut while this is open) or by clicking/touching
+// the Run/Set/Cancel buttons (bound in rummyBindControls() via
+// bindPressNoFocus, so a mouse/touch activation doesn't move focus there
+// either).
+
+function isRummyMeldChoiceOpen() {
+  return !!appState.rummyPendingMeldChoice;
+}
+
+function rummyOpenMeldChoice(cards, options) {
+  appState.rummyPendingMeldChoice = { cards: cards.slice(), options: (options || []).slice() };
+  const choiceEl = document.getElementById('rummy-meld-choice');
+  if (choiceEl) {
+    choiceEl.classList.remove('hidden');
+  }
+  // assertive + canInterruptLock, matching openColorPicker()'s announcement -
+  // this must be heard immediately, but it must not "reread the entire
+  // table" (issue requirement): only this one sentence is spoken, nothing
+  // else re-announces just because the choice appeared.
+  srSpeak('This selection could be a run or a set. Press R for run, S for set, or Escape to cancel.', 'assertive', { canInterruptLock: true });
+}
+
+function rummyCloseMeldChoice() {
+  appState.rummyPendingMeldChoice = null;
+  const choiceEl = document.getElementById('rummy-meld-choice');
+  if (choiceEl) {
+    choiceEl.classList.add('hidden');
+  }
+}
+
+function rummyChooseMeldType(type) {
+  if (!isRummyMeldChoiceOpen()) {
+    return;
+  }
+  const pending = appState.rummyPendingMeldChoice;
+  rummyCloseMeldChoice();
+  srSpeak('Melding as a ' + type + '.', 'assertive', { canInterruptLock: true });
+  socket.emit('rummyMeldCards', { cards: pending.cards, meldTypeChoice: type });
+}
+
+function rummyCancelMeldChoice() {
+  if (!isRummyMeldChoiceOpen()) {
+    return;
+  }
+  rummyCloseMeldChoice();
+  srSpeak('Meld canceled. Cards remain marked.', 'assertive', { canInterruptLock: true });
+}
+
+function handleRummyMeldChoiceKey(key) {
+  if (!isRummyMeldChoiceOpen()) {
+    return false;
+  }
+  if (key === 'escape') {
+    rummyCancelMeldChoice();
+    return true;
+  }
+  if (key === 'r') {
+    rummyChooseMeldType('run');
+    return true;
+  }
+  if (key === 's') {
+    rummyChooseMeldType('set');
+    return true;
+  }
+  // Any other key (e.g. Tab) is left alone, same as
+  // handleColorPickerKey()/isColorPickerOpen()'s "else if" branch in Lumo -
+  // handled stays false, so handleRummyKeys() below neither preventDefault()s
+  // it nor lets it fall through to a normal Rummy shortcut, and focus/
+  // position is otherwise completely undisturbed by the choice being open.
+  return false;
 }
 
 // Client-side duplicate of games/rummy/rules.js's canExtendMeld (pure,
@@ -1023,6 +1154,21 @@ function handleRummyKeys(event) {
     return;
   }
 
+  const key = event.key.toLowerCase();
+
+  // Mirrors public/games/lumo/lumo-client.js's isColorPickerOpen() branch in
+  // handleGameKeys(): while a Run/Set answer is pending, every other Rummy
+  // shortcut below (including 1-6 and even ?) is bypassed entirely, but a key
+  // handleRummyMeldChoiceKey() doesn't itself recognize (e.g. Tab) is left
+  // completely alone rather than preventDefault()'d - see that function's
+  // comments for why.
+  if (isRummyMeldChoiceOpen()) {
+    if (handleRummyMeldChoiceKey(key)) {
+      event.preventDefault();
+    }
+    return;
+  }
+
   if (event.key === '?') {
     openHelpOverlay();
     event.preventDefault();
@@ -1035,7 +1181,6 @@ function handleRummyKeys(event) {
     return;
   }
 
-  const key = event.key.toLowerCase();
   if (key === 'h') {
     announceRummyHand();
     event.preventDefault();
@@ -1094,6 +1239,12 @@ socket.on('rummyHand', function (payload) {
   // hand, so drop the selection and let the player re-mark for their next
   // action.
   appState.rummySelectedCards = [];
+  // A fresh hand snapshot means whatever cards a pending Run/Set choice was
+  // about (e.g. a new hand dealt, or a reconnect resync) may no longer be
+  // meaningful - close it rather than leave it referencing stale cards.
+  if (isRummyMeldChoiceOpen()) {
+    rummyCloseMeldChoice();
+  }
 
   renderRummyWidgets();
 
@@ -1167,6 +1318,10 @@ socket.on('rummyDrawResult', function (payload) {
 
 socket.on('rummyMeldResult', function (payload) {
   if (!payload) {
+    return;
+  }
+  if (payload.needsChoice) {
+    rummyOpenMeldChoice(appState.rummyLastMeldAttemptCards, payload.options);
     return;
   }
   if (!payload.success) {
@@ -1263,6 +1418,14 @@ function rummyBindControls() {
   bindPress(document.getElementById('rummy-layoff-btn'), rummyCommitLayoff);
   bindPress(document.getElementById('rummy-discard-btn'), rummyAttemptDiscardSelected);
   bindPress(document.getElementById('rummy-unmark-btn'), rummyUnmarkAllCards);
+  // bindPressNoFocus (not bindPress) - same as Lumo's color-picker buttons
+  // (see main.js's bindWildColorPicker-equivalent wiring) - a mouse or touch
+  // activation must not move focus into this inline panel either, matching
+  // "must not unexpectedly move focus" for every input modality, not just
+  // the keyboard.
+  bindPressNoFocus(document.getElementById('rummy-meld-choice-run-btn'), function () { rummyChooseMeldType('run'); });
+  bindPressNoFocus(document.getElementById('rummy-meld-choice-set-btn'), function () { rummyChooseMeldType('set'); });
+  bindPressNoFocus(document.getElementById('rummy-meld-choice-cancel-btn'), rummyCancelMeldChoice);
 }
 
 document.addEventListener('DOMContentLoaded', function () {

@@ -503,3 +503,206 @@ test('scoreHand: an unmatched Ace left in hand scores 1 deadwood in ace-low-only
   assert.deepEqual(rules.scoreHand(hands, 0, ACE_LOW).deadwoodByPlayer, [0, 6]);
   assert.deepEqual(rules.scoreHand(hands, 0, ACE_HIGH).deadwoodByPlayer, [0, 16]);
 });
+
+// --- Deterministic Joker melds: resolveMeld() -------------------------------
+// See the "Implement Deterministic Joker Melds and Layoffs" issue - every
+// case below is drawn directly from that issue's own examples.
+
+test('resolveMeld: "8S, Joker, Joker" is genuinely ambiguous (both a set and a run are legal) - needsChoice with no meldTypeChoice given', () => {
+  const result = rules.resolveMeld(['8S', '1J', '2J'], ACE_LOW);
+  assert.equal(result.ok, true);
+  assert.equal(result.needsChoice, true);
+  assert.deepEqual(result.options.slice().sort(), ['run', 'set']);
+});
+
+test('resolveMeld: "8S, Joker, Joker" as a Set represents three 8s', () => {
+  const result = rules.resolveMeld(['8S', '1J', '2J'], ACE_LOW, 'set');
+  assert.equal(result.needsChoice, false);
+  assert.equal(result.type, 'set');
+  assert.equal(rules.rankOf(result.jokers['1J']), '8');
+  assert.equal(rules.rankOf(result.jokers['2J']), '8');
+  assert.equal(result.cards.length, 3);
+});
+
+test('resolveMeld: "8S, Joker, Joker" as a Run represents 8S-9S-TS (both Jokers selected after the 8, so both extend high)', () => {
+  const result = rules.resolveMeld(['8S', '1J', '2J'], ACE_LOW, 'run');
+  assert.equal(result.needsChoice, false);
+  assert.equal(result.type, 'run');
+  assert.deepEqual(result.cards, ['8S', '1J', '2J']);
+  assert.equal(result.jokers['1J'], '9S');
+  assert.equal(result.jokers['2J'], 'TS');
+});
+
+test('resolveMeld: "Joker, 8S, Joker" as a Set represents three 8s', () => {
+  const result = rules.resolveMeld(['1J', '8S', '2J'], ACE_LOW, 'set');
+  assert.equal(result.type, 'set');
+  assert.equal(rules.rankOf(result.jokers['1J']), '8');
+  assert.equal(rules.rankOf(result.jokers['2J']), '8');
+});
+
+test('resolveMeld: "Joker, 8S, Joker" as a Run represents 7S-8S-9S (one Joker before the 8, one after)', () => {
+  const result = rules.resolveMeld(['1J', '8S', '2J'], ACE_LOW, 'run');
+  assert.equal(result.type, 'run');
+  assert.deepEqual(result.cards, ['1J', '8S', '2J']);
+  assert.equal(result.jokers['1J'], '7S');
+  assert.equal(result.jokers['2J'], '9S');
+});
+
+test('resolveMeld: "Joker, King, Ace" (ace-high) has only one legal interpretation and resolves automatically to Queen-King-Ace, no prompt', () => {
+  const result = rules.resolveMeld(['1J', 'KS', 'AS'], ACE_HIGH);
+  assert.equal(result.needsChoice, false);
+  assert.equal(result.type, 'run');
+  assert.equal(result.jokers['1J'], 'QS');
+  assert.deepEqual(result.cards, ['1J', 'KS', 'AS']);
+});
+
+test('resolveMeld: "Ace, King, Joker" (ace-high) resolves the same way regardless of selection order, and stores the Joker in its logical (Queen) position, not at the end', () => {
+  const result = rules.resolveMeld(['AS', 'KS', '1J'], ACE_HIGH);
+  assert.equal(result.needsChoice, false);
+  assert.equal(result.type, 'run');
+  assert.equal(result.jokers['1J'], 'QS');
+  assert.deepEqual(result.cards, ['1J', 'KS', 'AS']);
+});
+
+test('resolveMeld: "7S, Joker, 9S" has only one legal interpretation (the Joker must fill the 8S gap) - no Run/Set prompt since it can never be a set', () => {
+  const result = rules.resolveMeld(['7S', '1J', '9S'], ACE_LOW);
+  assert.equal(result.needsChoice, false);
+  assert.equal(result.type, 'run');
+  assert.equal(result.jokers['1J'], '8S');
+});
+
+test('resolveMeld: "Ace, Joker, 3S" (ace-low) resolves to Ace-Joker(2S)-3S, stored/displayed in that logical order', () => {
+  const result = rules.resolveMeld(['AS', '1J', '3S'], ACE_LOW);
+  assert.equal(result.needsChoice, false);
+  assert.equal(result.jokers['1J'], '2S');
+  assert.deepEqual(result.cards, ['AS', '1J', '3S']);
+});
+
+test('resolveMeld: "Queen, King, Ace" (ace-high) stores/displays in that ascending logical order', () => {
+  const result = rules.resolveMeld(['QS', 'KS', 'AS'], ACE_HIGH);
+  assert.equal(result.type, 'run');
+  assert.deepEqual(result.cards, ['QS', 'KS', 'AS']);
+});
+
+test('resolveMeld: rejects a King-Ace-2 wraparound run in either Ace mode', () => {
+  assert.equal(rules.resolveMeld(['KS', 'AS', '2S'], ACE_LOW).ok, false);
+  assert.equal(rules.resolveMeld(['KS', 'AS', '2S'], ACE_HIGH).ok, false);
+});
+
+test('resolveMeld: rejects a King-Joker-2 wraparound attempt - the Joker would need to represent an Ace anchoring the top of the suit (for King) and the bottom (for 2) at once', () => {
+  assert.equal(rules.resolveMeld(['KS', '1J', '2S'], ACE_LOW).ok, false);
+  assert.equal(rules.resolveMeld(['KS', '1J', '2S'], ACE_HIGH).ok, false);
+});
+
+test('resolveMeld: an unambiguous selection ignores a stale/wrong meldTypeChoice and resolves to its one legal interpretation', () => {
+  const result = rules.resolveMeld(['7S', '1J', '9S'], ACE_LOW, 'set');
+  assert.equal(result.ok, true);
+  assert.equal(result.type, 'run');
+});
+
+test('resolveMeld: rejects a selection that is neither a legal run nor a legal set', () => {
+  const result = rules.resolveMeld(['4H', '5D', '6H'], ACE_LOW);
+  assert.equal(result.ok, false);
+});
+
+// --- Joker replacement -------------------------------------------------------
+
+test('Joker replacement: for "7S, Joker(8S), 9S" - only the exact 8S may replace the Joker; 6S and TS may not, though TS remains a legal extension', () => {
+  const meld = rules.resolveMeld(['7S', '1J', '9S'], ACE_LOW);
+  const group = { type: meld.type, cards: meld.cards, jokers: meld.jokers, mode: meld.mode };
+
+  assert.equal(rules.findJokerSwapTarget(group, '8S'), '1J');
+  assert.equal(rules.findJokerSwapTarget(group, '6S'), null);
+  assert.equal(rules.findJokerSwapTarget(group, 'TS'), null);
+
+  // TS is still a legal extension of the group (a distinct operation from
+  // replacing the Joker) - this must keep working independently.
+  assert.ok(rules.canExtendMeld(group, 'TS', ACE_LOW));
+
+  const swapped = rules.applyJokerSwap(group, '8S', '1J', ACE_LOW);
+  assert.deepEqual(swapped.cards, ['7S', '8S', '9S']);
+  assert.deepEqual(swapped.jokers, {});
+});
+
+// --- Sets --------------------------------------------------------------------
+
+test('Sets: a set containing "8, Joker(8), 8" only accepts another legal 8 for layoff - 7 and 9 are rejected', () => {
+  // Reals are 8C/8D; the Joker is assigned the next unused canonical suit
+  // (8H - see assignSetJokerSuits()'s header), leaving 8S as the one
+  // genuinely-new suit a real card can still add.
+  const meld = rules.resolveMeld(['8C', '1J', '8D'], ACE_LOW, 'set');
+  const group = { type: meld.type, cards: meld.cards, jokers: meld.jokers, mode: meld.mode };
+  assert.equal(meld.jokers['1J'], '8H');
+
+  assert.ok(rules.canExtendMeld(group, '8S', ACE_LOW));
+  assert.ok(!rules.canExtendMeld(group, '7S', ACE_LOW));
+  assert.ok(!rules.canExtendMeld(group, '9S', ACE_LOW));
+});
+
+// --- Multiple layoffs at once (resolveGroupExtension) ------------------------
+
+test('resolveGroupExtension: extends the low end of an existing run', () => {
+  const run = { type: 'run', cards: ['8S', '9S', 'TS'] };
+  const best = rules.findBestJokerAssignment(run, ['7S'], ACE_LOW);
+  assert.deepEqual(best.cards, ['7S']);
+  const extended = rules.resolveGroupExtension(run, best.cards, ACE_LOW);
+  assert.deepEqual(extended.cards, ['7S', '8S', '9S', 'TS']);
+});
+
+test('resolveGroupExtension: extends the high end of an existing run', () => {
+  const run = { type: 'run', cards: ['8S', '9S', 'TS'] };
+  const best = rules.findBestJokerAssignment(run, ['JS'], ACE_LOW);
+  const extended = rules.resolveGroupExtension(run, best.cards, ACE_LOW);
+  assert.deepEqual(extended.cards, ['8S', '9S', 'TS', 'JS']);
+});
+
+test('resolveGroupExtension: extends both ends of an existing run in a single batch', () => {
+  const run = { type: 'run', cards: ['8S', '9S', 'TS'] };
+  const best = rules.findBestJokerAssignment(run, ['7S', 'JS'], ACE_LOW);
+  assert.deepEqual(best.cards.slice().sort(), ['7S', 'JS']);
+  const extended = rules.resolveGroupExtension(run, best.cards, ACE_LOW);
+  assert.deepEqual(extended.cards, ['7S', '8S', '9S', 'TS', 'JS']);
+});
+
+test('resolveGroupExtension: a new Joker added to an existing run resolves to the correct gap and keeps the group\'s established Ace mode stable', () => {
+  const run = { type: 'run', cards: ['QC', 'KC', 'AC'], jokers: {}, mode: rules.ACE_HIGH_ORDER_VALUE };
+  const best = rules.findBestJokerAssignment(run, ['1J', 'TC'], ACE_HIGH);
+  assert.deepEqual(best.cards.slice().sort(), ['1J', 'TC']);
+  const extended = rules.resolveGroupExtension(run, best.cards, ACE_HIGH);
+  assert.equal(extended.mode, rules.ACE_HIGH_ORDER_VALUE);
+  assert.equal(extended.jokers['1J'], 'JC');
+  assert.deepEqual(extended.cards, ['TC', '1J', 'QC', 'KC', 'AC']);
+});
+
+test('resolveGroupExtension: replacing a Joker while also adding a new card in the same batch resolves both together', () => {
+  // Existing run 7S-8S-Joker(9S); the player holds the exact replacement
+  // (9S) plus TS, extending past it - both should land in one batch, the
+  // Joker released back to the player's hand by the caller (see
+  // games/rummy/index.js's performLayOffCards(), exercised end-to-end in
+  // tests/rummy-game.test.js).
+  const meld = rules.resolveMeld(['7S', '8S', '1J'], ACE_LOW);
+  assert.equal(meld.jokers['1J'], '9S');
+  const group = { type: meld.type, cards: meld.cards, jokers: meld.jokers, mode: meld.mode };
+
+  const swapJoker = rules.findJokerSwapTarget(group, '9S');
+  assert.equal(swapJoker, '1J');
+  const swapped = rules.applyJokerSwap(group, '9S', swapJoker, ACE_LOW);
+  assert.deepEqual(swapped.cards, ['7S', '8S', '9S']);
+
+  const best = rules.findBestJokerAssignment(swapped, ['TS'], ACE_LOW);
+  const extended = rules.resolveGroupExtension(swapped, best.cards, ACE_LOW);
+  assert.deepEqual(extended.cards, ['7S', '8S', '9S', 'TS']);
+  assert.deepEqual(extended.jokers, {});
+});
+
+// --- Ace ordering -------------------------------------------------------------
+
+test('Ace ordering: Ace-2-3 (ace-low) is stored and displayed in that logical order', () => {
+  const result = rules.resolveMeld(['3S', 'AS', '2S'], ACE_LOW);
+  assert.deepEqual(result.cards, ['AS', '2S', '3S']);
+});
+
+test('Ace ordering: Queen-King-Ace (ace-high) is stored and displayed in that logical order', () => {
+  const result = rules.resolveMeld(['AS', 'QS', 'KS'], ACE_HIGH);
+  assert.deepEqual(result.cards, ['QS', 'KS', 'AS']);
+});
